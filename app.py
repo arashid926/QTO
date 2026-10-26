@@ -85,8 +85,12 @@ def cached_pdf_image(data: bytes, page: int, crop: tuple, highlight: tuple = ())
 
 
 @st.cache_data(show_spinner="Preparing drawing for measuring…", max_entries=8)
-def cached_measure_image(data: bytes, name: str, page: int, dpi: int) -> tuple[str, float, list[float]]:
-    """(JPEG data URL, display pixels per drawing unit, flat snap-point list in display pixels)."""
+def cached_measure_image(data: bytes, name: str, page: int, dpi: int) -> tuple[str, float, list[float], float | None]:
+    """(JPEG data URL, display pixels per drawing unit, flat snap-point list in display pixels,
+    known metres per drawing unit or None when the user has to set the scale)."""
+    if name.lower().endswith(".dxf"):
+        image, m_per_px, snap = dxf_takeoff.render_image(dxf_takeoff.takeoff(data, None, True))
+        return measure.image_data_url(image), 1.0, snap, m_per_px
     if name.lower().endswith(".pdf"):
         image, k = pdf_takeoff.render_for_measure(data, page, dpi)
         snap = [round(v * k, 1) for xy in pdf_takeoff.snap_points(data, page) for v in xy]
@@ -97,7 +101,7 @@ def cached_measure_image(data: bytes, name: str, page: int, dpi: int) -> tuple[s
         if k < 1.0:
             image = image.resize((int(image.width * k), int(image.height * k)))
         snap = []
-    return measure.image_data_url(image), k, snap
+    return measure.image_data_url(image), k, snap, None
 
 
 @st.cache_data(show_spinner="Measuring linework…", max_entries=16)
@@ -352,21 +356,28 @@ def render_takeoff(sources: dict[str, bytes]) -> None:
     doc = top[0].selectbox("Drawing", list(sources), key="mt_doc")
     data = sources[doc]
     is_pdf = doc.lower().endswith(".pdf")
+    is_dxf = doc.lower().endswith(".dxf")
     pages = cached_pdf_pages(data) if is_pdf else 1
     page = int(top[1].number_input("Page", 1, pages, 1, key=f"mt_pg_{doc}")) - 1
     detail = top[2].selectbox("Detail", ["Standard", "Fine", "Draft"], key="mt_dpi", disabled=not is_pdf,
                               help="Fine renders sharper text for small details but loads slower")
-    snap_on = top[3].toggle("Snap to drawing", True, key="mt_snap", disabled=not is_pdf,
+    snap_on = top[3].toggle("Snap to drawing", True, key="mt_snap", disabled=not (is_pdf or is_dxf),
                             help="Clicks jump to the nearest line end or corner of the CAD drawing")
-    image_url, k, snap = cached_measure_image(data, doc, page, {"Standard": 110, "Fine": 160, "Draft": 72}[detail])
+    try:
+        image_url, k, snap, known_scale = cached_measure_image(data, doc, page, {"Standard": 110, "Fine": 160, "Draft": 72}[detail])
+    except Exception as exc:
+        st.error(f"Could not open this drawing for measuring: {exc}")
+        return
     pkey = measure.page_key(doc, page)
+    if known_scale and pkey not in mt["calibration"]:
+        mt["calibration"][pkey] = known_scale  # DXF coordinates are real-world, so the scale is exact
     mpu = mt["calibration"].get(pkey)
 
     canvas_col, side = st.columns([3, 1])
     with side:
         st.markdown("##### 1 · Scale")
         if mpu:
-            shown = f"1 : {mpu / measure.PT_TO_M:,.0f}" if is_pdf else f"{mpu * 1000:.2f} mm per pixel"
+            shown = f"1 : {mpu / measure.PT_TO_M:,.0f}" if is_pdf else "exact, from the DXF units" if is_dxf else f"{mpu * 1000:.2f} mm per pixel"
             st.success(f"Scale set — {shown}")
         else:
             st.warning("Set the scale before measuring lengths and areas. Counts work without it.")
@@ -759,9 +770,14 @@ with tab_measure:
     st.caption("Measure directly on the drawing, the way a QS does in CostX or Bluebeam: set the scale, pick a take-off item, "
                "then click points (count), runs (length) or outlines (area). Every measurement lands on the QTO dimension sheet, "
                "which feeds the BOQ.")
-    plans = st.file_uploader("Upload drawings to measure (PDF, or scanned plans as PNG/JPG)", type=["pdf", "png", "jpg", "jpeg"],
-                             accept_multiple_files=True, key="up_measure")
-    measure_sources = {n: d for n, d in drawings.items() if n.lower().endswith(".pdf")}
+    up_col, sample_col = st.columns([4, 1])
+    plans = up_col.file_uploader("Upload drawings to measure (PDF, DXF, or scanned plans as PNG/JPG)",
+                                 type=["pdf", "dxf", "png", "jpg", "jpeg"], accept_multiple_files=True, key="up_measure")
+    sample_col.write("")
+    if sample_col.button("✨ Load sample plan", key="mt_sample"):
+        ss.sample_dxf = samples.sample_dxf_bytes()
+        st.rerun()
+    measure_sources = dict(drawings)  # PDFs and DXFs from the 2D Drawings tab, including the sample plan
     measure_sources.update({f.name: f.getvalue() for f in plans or []})
     render_takeoff(measure_sources)
 
