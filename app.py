@@ -369,13 +369,15 @@ def takeoff_header(mt: dict) -> tuple[str, int, str]:
     """View switcher plus the building and level that new measurements go to."""
     v_col, b_col, add_col, l_col = st.columns([3, 2, 1, 1])
     view = v_col.radio("View", VIEWS, horizontal=True, key="mt_view", label_visibility="collapsed")
+    def add_building():  # runs before the rerun, so it may reset these widgets
+        building = measure.add_building(ss.mt, ss.get("mt_new_building", ""))
+        ss.mt_building = building["id"]
+        ss.mt_new_building = ""
+        ss.mt_ver += 1
+
     with add_col.popover("➕ Building", use_container_width=True):
-        name = st.text_input("Building name", placeholder="e.g. Villa Type A, Block B, Car park", key="mt_new_building")
-        if st.button("Add building", type="primary", key="mt_add_building"):
-            building = measure.add_building(mt, name)
-            ss.mt_building = building["id"]
-            ss.mt_ver += 1
-            st.rerun()
+        st.text_input("Building name", placeholder="e.g. Villa Type A, Block B, Car park", key="mt_new_building")
+        st.button("Add building", type="primary", key="mt_add_building", on_click=add_building)
     ids = [b["id"] for b in mt["buildings"]]
     if ss.get("mt_building") not in ids:
         ss.mt_building = ids[0]
@@ -710,11 +712,13 @@ def render_workbook_view(mt: dict) -> None:
             },
         )
         changed = False
-        for ref, rate in zip(edited["Ref"], edited["Rate"]):
+        for ref, old, new in zip(edited["Ref"], view["Rate"], edited["Rate"]):
+            new = float(new or 0.0)
+            if new == float(old or 0.0):
+                continue  # only the cell the user changed; other buildings' lines share the same rate
             it = next((i for i in mt["items"] if ref == i["ref"] or ref.startswith(i["ref"] + "-")), None)
-            rate = float(rate or 0.0)
-            if it is not None and float(it.get("rate") or 0.0) != rate:
-                it["rate"] = rate  # one rate per dimension group, shared by its buildings
+            if it is not None:
+                it["rate"] = new  # one rate per dimension group, shared by its buildings
                 changed = True
         if changed:
             ss.mt_ver += 1
