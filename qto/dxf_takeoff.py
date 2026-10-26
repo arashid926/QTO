@@ -226,6 +226,51 @@ def _block_table(top_inserts: pd.DataFrame) -> pd.DataFrame:
     return table[columns]
 
 
+def render_image(result: DxfResult, max_side: int = 4000, margin: int = 40):
+    """Draw the measured geometry as an image for on-screen take-off.
+
+    Returns (image, metres per pixel, flat list of snap points in pixels). The scale is exact,
+    so a DXF needs no calibration before measuring.
+    """
+    from PIL import Image, ImageDraw
+
+    xs = [x for _, px, _ in result.preview for x in px if x is not None] + result.markers["X"].tolist()
+    ys = [y for _, _, py in result.preview for y in py if y is not None] + result.markers["Y"].tolist()
+    if not xs:
+        return Image.new("RGB", (800, 600), "white"), 1.0, []
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    span = max(x1 - x0, y1 - y0, 1e-6)
+    px_per_m = (max_side - 2 * margin) / span
+    width = int((x1 - x0) * px_per_m) + 2 * margin
+    height = int((y1 - y0) * px_per_m) + 2 * margin
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+
+    def to_px(x, y):
+        return (margin + (x - x0) * px_per_m, margin + (y1 - y) * px_per_m)  # DXF y points up, image y down
+
+    snap, seen = [], set()
+    for _layer, px, py in result.preview:
+        run = []
+        for x, y in list(zip(px, py)) + [(None, None)]:
+            if x is None:
+                if len(run) > 1:
+                    draw.line(run, fill=(20, 20, 20), width=2)
+                for p in (run[:1] + run[-1:]) if len(run) > 12 else run:  # vertices, not every arc segment
+                    key = (round(p[0], 1), round(p[1], 1))
+                    if key not in seen and len(snap) < 80_000:
+                        seen.add(key)
+                        snap.extend(key)
+                run = []
+            else:
+                run.append(to_px(x, y))
+    for x, y in zip(result.markers["X"], result.markers["Y"]):
+        cx, cy = to_px(x, y)
+        draw.rectangle([cx - 5, cy - 5, cx + 5, cy + 5], outline=(37, 99, 235), width=2)
+        snap.extend((round(cx, 1), round(cy, 1)))
+    return image, 1.0 / px_per_m, snap
+
+
 def count_tags(texts: pd.DataFrame, tags: list[str]) -> pd.DataFrame:
     """Count text labels such as door/window marks (D1, W2) placed on the drawing."""
     normalised = texts["Text"].astype(str).str.strip().str.upper()
