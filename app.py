@@ -60,6 +60,8 @@ for key, value in {"boq": boq.empty(), "boq_ver": 0, "details": {}, "rates": rat
                    project.CURRENCY_KEY: "USD", "p_standard": STANDARDS[0], "files": {}, "nav": NAV[0]}.items():
     ss.setdefault(key, value)
 ss["mt"] = measure.upgrade(ss["mt"])
+if "nav_pending" in ss:  # set by dialogs, applied before the view selector is drawn
+    ss.nav = ss.pop("nav_pending")
 
 # A project switch is requested by a button, then applied here, before any project widget is drawn.
 if "pending_project" in ss:
@@ -396,30 +398,47 @@ def current_drawing() -> tuple[str | None, int]:
     return doc, int(ss.get(f"mt_pg_{doc}", 1)) - 1 if doc else 0
 
 
-def create_item_cb():
-    """Callback for ➕ New item: runs before widgets, so the new item can become the active one."""
-    mt = ss.mt
-    kind = ss.get("new_kind")
-    desc = ss.get("new_desc", "").strip()
-    if kind and kind.startswith("asm:"):
-        key = kind[4:]
-        trade = asm.TEMPLATES[key]["trade"]
-        discipline = "Architectural" if trade == "Architectural" else "Structural"
-        section = asm.S_MAS if key == "blockwork_wall" else asm.S_CON
-        item = measure.add_assembly_item(mt, key, desc or asm.TEMPLATES[key]["label"], discipline, section)
-    else:
-        p_desc, p_disc, p_sec, p_kind, p_w, p_d = measure.PRESETS[kind[7:]] if kind and kind.startswith("preset:") else measure.PRESETS["Blank"]
-        item = measure.add_item(mt, desc or p_desc or "Take-off item", p_disc, p_sec, p_kind, p_w, p_d)
-    ss.mt_active = item["id"]
-    ss.new_desc = ""
-    ss.mt_ver += 1
+TEMPLATE_OPTIONS = {f"asm:{k}": f"⚙ {v['trade']}: {v['label']}" for k, v in asm.TEMPLATES.items()}
+TEMPLATE_OPTIONS.update({f"preset:{k}": f"📐 Simple: {k}" for k in measure.PRESETS})
 
 
-def add_building_cb():
-    building = measure.add_building(ss.mt, ss.get("mt_new_building", ""))
-    ss.mt_building = building["id"]
-    ss.mt_new_building = ""
-    ss.mt_ver += 1
+# Dialogs close themselves with st.rerun(), so they never cover the drawing (clicks on the drawing
+# canvas cannot close a popover). Widget keys they change are applied through "pending_*" values.
+
+@st.dialog("➕ New take-off item", width="large")
+def new_item_dialog() -> None:
+    kind = st.selectbox("Template", list(TEMPLATE_OPTIONS), format_func=TEMPLATE_OPTIONS.get)
+    if kind.startswith("asm:"):
+        st.caption(asm.TEMPLATES[kind[4:]]["help"])
+    desc = st.text_input("Description (optional)", placeholder="e.g. F1 isolated footing, BW200 external wall").strip()
+    if st.button("Create item", type="primary"):
+        if kind.startswith("asm:"):
+            key = kind[4:]
+            discipline = "Architectural" if asm.TEMPLATES[key]["trade"] == "Architectural" else "Structural"
+            section = asm.S_MAS if key == "blockwork_wall" else asm.S_CON
+            item = measure.add_assembly_item(ss.mt, key, desc or asm.TEMPLATES[key]["label"], discipline, section)
+        else:
+            p_desc, p_disc, p_sec, p_kind, p_w, p_d = measure.PRESETS[kind[7:]]
+            item = measure.add_item(ss.mt, desc or p_desc or "Take-off item", p_disc, p_sec, p_kind, p_w, p_d)
+        ss.pending_active = item["id"]
+        ss.nav_pending = NAV[0]
+        ss.mt_ver += 1
+        st.rerun()
+
+
+@st.dialog("➕ Add building")
+def building_dialog() -> None:
+    name = st.text_input("Building name", placeholder="e.g. Villa Type A, Block B, Car park")
+    st.caption("Levels are copied from the first building; edit them in 🗂️ Dimension Group View.")
+    if st.button("Add building", type="primary"):
+        ss.pending_building = measure.add_building(ss.mt, name)["id"]
+        ss.mt_ver += 1
+        st.rerun()
+
+
+@st.dialog("⚙️ Item parameters", width="large")
+def item_dialog(item_id: int) -> None:
+    item_params_form(measure.item_by_id(ss.mt, item_id))
 
 
 # ------------------------------------------------------------------ ribbon
@@ -520,9 +539,10 @@ def globals_form() -> None:
 def ribbon_home(issue_count: int) -> None:
     mt = ss.mt
     c = st.columns([2.2, 1, 1.2, 1, 1, 1, 1.2])
-    with c[1].popover("➕ Building", use_container_width=True):
-        st.text_input("Building name", placeholder="e.g. Villa Type A, Block B, Car park", key="mt_new_building")
-        st.button("Add building", type="primary", key="mt_add_building", on_click=add_building_cb)
+    if c[1].button("➕ Building", use_container_width=True):
+        building_dialog()
+    if "pending_building" in ss:
+        ss.mt_building = ss.pop("pending_building")
     ids = [b["id"] for b in mt["buildings"]]
     if ss.get("mt_building") not in ids:
         ss.mt_building = ids[0]
@@ -590,23 +610,18 @@ def ribbon_dimension() -> None:
     mt = ss.mt
     c = st.columns([2.4, 2.6, 1, 1.1, 0.9, 0.9, 1.4])
     c[0].radio("Tool", TOOLS, key="mt_tool", horizontal=True, label_visibility="collapsed")
-    with c[2].popover("➕ New item", use_container_width=True):
-        options = {f"asm:{k}": f"⚙ {v['trade']}: {v['label']}" for k, v in asm.TEMPLATES.items()}
-        options.update({f"preset:{k}": f"📐 Simple: {k}" for k in measure.PRESETS})
-        st.selectbox("Template", list(options), format_func=options.get, key="new_kind")
-        kind = ss.get("new_kind", "")
-        if kind.startswith("asm:"):
-            st.caption(asm.TEMPLATES[kind[4:]]["help"])
-        st.text_input("Description (optional)", key="new_desc", placeholder="e.g. F1 isolated footing, BW200 external wall")
-        st.button("Create item", type="primary", key="new_item_go", on_click=create_item_cb)
+    if c[2].button("➕ New item", use_container_width=True):
+        new_item_dialog()
+    if "pending_active" in ss:
+        ss.mt_active = ss.pop("pending_active")
     ids = [i["id"] for i in mt["items"]]
     if ss.get("mt_active") not in ids:
         ss.mt_active = ids[-1] if ids else None
     if ids:
         c[1].selectbox("Measuring", ids, format_func=lambda i: item_label(measure.item_by_id(mt, i)), key="mt_active",
                        label_visibility="collapsed")
-        with c[3].popover("⚙️ Item", use_container_width=True):
-            item_params_form(measure.item_by_id(mt, ss.mt_active))
+        if c[3].button("⚙️ Item", use_container_width=True):
+            item_dialog(ss.mt_active)
     else:
         c[1].caption("No items yet — click ➕ New item")
     c[4].number_input("× Times", 0.01, 1000.0, 1.0, step=1.0, key="mt_times", label_visibility="collapsed",
