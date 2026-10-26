@@ -22,7 +22,7 @@ def blank(name: str, client: str = "", location: str = "", prepared_by: str = ""
         "format": FORMAT, "version": 1,
         "info": {"p_name": name.strip() or "New Project", "p_client": client, "p_location": location, "p_by": prepared_by},
         "currency": currency, "boq": [], "rates": [],
-        "takeoff": {k: takeoff[k] for k in ("items", "shapes", "calibration", "buildings", "split_buildings")},
+        "takeoff": {k: takeoff[k] for k in measure.TAKEOFF_KEYS if k in takeoff},
     }
 
 
@@ -35,7 +35,7 @@ def snapshot(state) -> dict:
         "currency": state.get(CURRENCY_KEY, "USD"),
         "boq": state["boq"].to_dict("records"),
         "rates": state["rates"].to_dict("records"),
-        "takeoff": {k: takeoff[k] for k in ("items", "shapes", "calibration", "buildings", "split_buildings")},
+        "takeoff": {k: takeoff[k] for k in measure.TAKEOFF_KEYS if k in takeoff},
     }
 
 

@@ -223,6 +223,8 @@ def to_excel(
     currency: str = "",
     details: dict[str, pd.DataFrame] | None = None,
     qto: pd.DataFrame | None = None,
+    derived: pd.DataFrame | None = None,
+    wall_schedule: pd.DataFrame | None = None,
 ) -> bytes:
     """Summary sheet + one priced bill per discipline (live formulas) + QTO dimension sheet + raw take-off sheets."""
     df = finalise(df)
@@ -267,6 +269,11 @@ def to_excel(
 
     if has_qto:
         _write_qto(wb.create_sheet(QTO_SHEET), qto)
+    if derived is not None and not derived.empty:  # assembly items with their formula trace
+        _write_table(wb.create_sheet(_sheet_name("Derived Items", taken)),
+                     derived[[c for c in ("Ref", "Building", "Description", "Unit", "Quantity", "Formula") if c in derived]])
+    if wall_schedule is not None and not wall_schedule.empty:
+        _write_table(wb.create_sheet(_sheet_name("Wall Schedule", taken)), wall_schedule)
     _write_table(wb.create_sheet(_sheet_name("All Items", taken)), df)
     for name, table in (details or {}).items():
         if isinstance(table, pd.DataFrame) and not table.empty:
