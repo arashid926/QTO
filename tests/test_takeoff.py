@@ -69,6 +69,14 @@ def test_explode_blocks_adds_geometry():
     assert layer(exploded, "A-DOOR")[M["Length"]] > 0
 
 
+def test_render_image_scale_is_exact(sample):
+    image, m_per_px, snap = dxf_takeoff.render_image(sample)
+    assert max(image.size) <= 4000 and len(snap) % 2 == 0 and snap
+    xs, ys = snap[0::2], snap[1::2]
+    # the drawing spans 18 m wide (road lines -3 m to 15 m), so the snapped extent must match that
+    assert (max(xs) - min(xs)) * m_per_px == pytest.approx(18.0, rel=1e-3)
+
+
 def test_classify():
     assert dz.classify("S-BEAM") == ("Structural", "11 In-situ concrete works")
     assert dz.classify("E-LITE") == ("MEP", "39 Electrical services")
