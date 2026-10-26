@@ -95,7 +95,7 @@ def test_templates_round_trip():
         table = schedules.read_schedule(t.to_csv(index=False).encode(), "t.csv")["CSV"]
         lines = schedules.normalise(table, schedules.auto_map(table.columns), discipline, "t")
         assert len(lines) == len(t)
-        assert (lines["Rate"] > 0).all()
+        assert (lines["Rate"] == 0).all()  # templates carry no preset rates
 
 
 def test_boq_from_measured_and_export(sample):

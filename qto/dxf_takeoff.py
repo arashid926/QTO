@@ -182,7 +182,8 @@ def _layer_table(ents: pd.DataFrame, top_inserts: pd.DataFrame) -> pd.DataFrame:
     blocks = top_inserts.groupby("Layer").size().rename("Blocks")
     table = agg.join(blocks, how="outer").fillna(0).reset_index()
     if table.empty:
-        return pd.DataFrame(columns=["Bill", "Discipline", "Work Section", "Measure", "Description", "Layer", C, L, A, "Closed shapes", "Blocks"])
+        return pd.DataFrame(columns=["Bill", "Discipline", "Work Section", "Measure", "Description", "Factor", dz.DIM_COLUMN,
+                                     "Layer", C, L, A, "Closed shapes", "Blocks"])
 
     def measure(r):
         if dz.suggest_count(r["Layer"]) and r["Count"] > 0:
@@ -197,11 +198,14 @@ def _layer_table(ents: pd.DataFrame, top_inserts: pd.DataFrame) -> pd.DataFrame:
     table["Measure"] = table.apply(measure, axis=1)
     table["Bill"] = [(not dz.is_annotation(n)) and (cnt > 0) for n, cnt in zip(table["Layer"], table["Count"])]
     table["Description"] = table["Layer"].map(dz.pretty_name)
+    table["Factor"] = 1.0
+    table[dz.DIM_COLUMN] = 0.0
     table = table.rename(columns={"Length": L, "Area": A, "Closed": "Closed shapes"})
     table[C] = table[C].astype(int)
     table["Closed shapes"] = table["Closed shapes"].astype(int)
     table["Blocks"] = table["Blocks"].astype(int)
-    return table[["Bill", "Discipline", "Work Section", "Measure", "Description", "Layer", C, L, A, "Closed shapes", "Blocks"]]
+    return table[["Bill", "Discipline", "Work Section", "Measure", "Description", "Factor", dz.DIM_COLUMN,
+                  "Layer", C, L, A, "Closed shapes", "Blocks"]]
 
 
 def _block_table(top_inserts: pd.DataFrame) -> pd.DataFrame:

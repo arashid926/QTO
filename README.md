@@ -12,10 +12,12 @@ Built in Python with [Streamlit](https://streamlit.io). It runs in the browser, 
 | Input | What you get |
 |---|---|
 | **DXF drawings** (2D CAD) | Length, closed area and object count **per layer**, block (symbol) counts, text-tag counts (D1, W1…), and an interactive plan preview. Units come from the drawing header and can be overridden. |
+| **On-screen take-off** (PDF, PNG/JPG scans) | Measure directly on the drawing, as in CostX or Bluebeam: set the scale from the drawing ratio or calibrate on a known dimension, then use **count** (points), **length** (runs) and **area** (outlines) tools, with snapping to CAD line ends, Shift for straight lines, zoom and pan. Each take-off item can carry a width/height and a depth/thickness, so a wall run becomes m² and a slab outline becomes m³. Timesing and deductions are supported. Every measurement goes onto a **QTO dimension sheet**, and the exported workbook links each BOQ quantity to that sheet with live formulas. Take-offs can be saved and reopened. |
 | **PDF drawings** (vector) | Scaled linework lengths and areas grouped by **pen colour and line weight** (a proxy for CAD layers), a crop box to leave out title blocks, tag counting across all pages, and **table extraction** for door, window and rebar schedules. |
 | **IFC models** (3D BIM: Revit, ArchiCAD, Tekla, Civil 3D…) | Element-by-element take-off from IFC base quantities (volume, area, length, weight), measured from the 3D geometry when quantities are missing. Shows storey, type and material, with filters and charts. |
 | **Mesh models** (OBJ, STL, PLY, GLB, OFF) | Volume, surface area and size of each object. |
-| **Schedules** (Excel / CSV) | One upload area per discipline. Header rows and columns are detected automatically (Ref, Description, Unit, Qty, Rate, Section), and unit spellings are normalised (sqm → m², nos → nr…). Downloadable templates included. |
+| **Schedules** (Excel / CSV) | One upload area per discipline. Header rows and columns are detected automatically (Ref, Description, Unit, Qty, Rate, Section), and unit spellings are normalised (sqm → m², nos → nr…). Downloadable templates included, with no preset rates. |
+| **Rate library** (Excel / CSV) | Upload your own unit rates, edit them in the app, and download them again as Excel or CSV. Rates are applied to the BOQ by item code, exact description, or closest similar description with the same unit, and a match report shows what was priced. Rates you priced in a BOQ can be saved back to the library for the next project. |
 | **BOQ** | An editable, priced bill with automatic references (`S.11.003`) that sorts by discipline and section. It exports to **Excel** with a summary sheet, one bill per discipline with live formulas and section totals, and the raw take-off sheets. CSV export too. |
 
 Every take-off row can be ticked or unticked, reassigned to a discipline or NRM2 section, and switched between **Count / Length / Area / Volume / Weight** before it goes into the BOQ.
@@ -70,10 +72,13 @@ qto-studio/
 ├── qto/
 │   ├── disciplines.py     # disciplines, NRM2 sections, classification rules
 │   ├── dxf_takeoff.py     # DXF lengths / areas / counts
-│   ├── pdf_takeoff.py     # PDF vector measurement, tags, tables
+│   ├── pdf_takeoff.py     # PDF vector measurement, legend reading, tags, tables
+│   ├── measure.py         # on-screen take-off items + QTO dimension sheet
+│   ├── canvas/            # interactive measuring canvas (HTML/JS component)
 │   ├── ifc_takeoff.py     # IFC BIM take-off
 │   ├── mesh_takeoff.py    # OBJ/STL/GLB take-off
 │   ├── schedules.py       # Excel/CSV schedule import + templates
+│   ├── rates.py           # rate library import, matching, export
 │   ├── boq.py             # BOQ building + Excel export
 │   └── samples.py         # demo drawing
 ├── tests/                 # pytest suite
@@ -88,7 +93,7 @@ Run the tests with `pip install pytest` and then `pytest`.
 
 - Native DWG reading through the ODA converter, when it's installed
 - On-screen measuring (click to measure) on PDF pages
-- Rate library and cost database per region
+- Shared rate libraries per region, saved online
 - Multi-storey DXF sets and revision comparison
 - Saving and loading projects
 

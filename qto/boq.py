@@ -29,6 +29,13 @@ def from_measured(table: pd.DataFrame, source: str) -> pd.DataFrame:
     for _, r in table[table["Bill"].fillna(False).astype(bool)].iterrows():
         measure = r.get("Measure") or "Count"
         qty = pd.to_numeric(r.get(dz.MEASURE_COLUMNS.get(measure, "Count")), errors="coerce")
+        factor = pd.to_numeric(r.get("Factor", 1.0), errors="coerce")
+        dim = pd.to_numeric(r.get(dz.DIM_COLUMN, 0.0), errors="coerce")
+        unit = dz.MEASURE_UNITS.get(measure, "nr")
+        if pd.notna(factor) and factor > 0:
+            qty = qty * factor
+        if pd.notna(dim) and dim > 0 and unit in dz.NEXT_UNIT:
+            qty, unit = qty * dim, dz.NEXT_UNIT[unit]
         if pd.isna(qty) or qty <= 0:
             continue
         rows.append({
@@ -36,7 +43,7 @@ def from_measured(table: pd.DataFrame, source: str) -> pd.DataFrame:
             "Discipline": r.get("Discipline") or dz.DEFAULT_CLASS[0],
             "Work Section": r.get("Work Section") or dz.UNCLASSIFIED,
             "Description": str(r.get("Description") or "").strip() or "Item",
-            "Unit": dz.MEASURE_UNITS.get(measure, "nr"),
+            "Unit": unit,
             "Quantity": round(float(qty), 3),
             "Rate": 0.0,
             "Source": source,
@@ -106,7 +113,51 @@ def _header(ws, row: int, values: list[str]) -> None:
         cell.border = BORDER
 
 
-def _write_discipline(ws, discipline: str, lines: pd.DataFrame, currency: str) -> str:
+QTO_SHEET = "QTO Sheet"
+
+
+def _write_qto(ws, sheet: pd.DataFrame) -> None:
+    """Dimension sheet with live formulas; BOQ quantities link to column M through SUMIF on the ref."""
+    ws["A1"] = "QTO / Dimension Sheet"
+    ws["A1"].font = Font(bold=True, size=14, color=NAVY)
+    ws["A2"] = "Quantity = Timesing × Measured × Width/Height × Depth/Thickness (deductions negative)"
+    ws["A2"].font = Font(italic=True, color="64748B")
+    headers = ["BOQ Ref", "Description", "Drawing", "Page", "Location", "Type", "Timesing", "Deduct",
+               "Measured", "Width/Height (m)", "Depth/Thk (m)", "Unit", "Quantity"]
+    _header(ws, 4, headers)
+    row = 5
+    for ref, group in sheet.groupby("BOQ Ref", sort=False):
+        first = row
+        for _, r in group.iterrows():
+            values = [
+                ref, r["Description"], r["Drawing"], int(r["Page"]), r["Location"] or None, r["Type"],
+                float(r["Timesing"]), "Yes" if r["Deduct"] else "No",
+                None if pd.isna(r["Measured"]) else float(r["Measured"]),
+                None if pd.isna(r["Width/Height (m)"]) else float(r["Width/Height (m)"]),
+                None if pd.isna(r["Depth/Thk (m)"]) else float(r["Depth/Thk (m)"]),
+                r["Unit"],
+                f'=IF(H{row}="Yes",-1,1)*G{row}*N(I{row})*IF(N(J{row})>0,J{row},1)*IF(N(K{row})>0,K{row},1)',
+            ]
+            for col, value in enumerate(values, start=1):
+                ws.cell(row=row, column=col, value=value).border = BORDER
+            for col in (9, 13):
+                ws.cell(row=row, column=col).number_format = QTY_FMT
+            if r["Deduct"]:
+                ws.cell(row=row, column=13).font = Font(color="DC2626")
+            row += 1
+        ws.cell(row=row, column=2, value=f"Total carried to BOQ item {ref}").font = Font(bold=True)
+        ws.cell(row=row, column=12, value=group["Unit"].iloc[0]).font = Font(bold=True)
+        total = ws.cell(row=row, column=13, value=f"=SUM(M{first}:M{row - 1})")
+        total.font, total.number_format = Font(bold=True), QTY_FMT
+        for col in range(1, 14):
+            ws.cell(row=row, column=col).fill = PatternFill("solid", fgColor=PALE)
+        row += 2
+    for col, width in zip("ABCDEFGHIJKLM", (10, 40, 22, 6, 18, 8, 9, 8, 12, 14, 13, 6, 13)):
+        ws.column_dimensions[col].width = width
+    ws.freeze_panes = "A5"
+
+
+def _write_discipline(ws, discipline: str, lines: pd.DataFrame, currency: str, qto_refs: frozenset = frozenset()) -> str:
     """Write one discipline bill; returns the address of its total cell."""
     ws["A1"] = f"{discipline} — Bill of Quantities"
     ws["A1"].font = Font(bold=True, size=14, color=NAVY)
@@ -119,7 +170,10 @@ def _write_discipline(ws, discipline: str, lines: pd.DataFrame, currency: str) -
         row += 1
         first = row
         for _, line in group.iterrows():
-            values = [line["Ref"], line["Description"], line["Unit"], float(line["Quantity"]), float(line["Rate"]), f"=D{row}*E{row}", line["Source"]]
+            quantity = float(line["Quantity"])
+            if line["Ref"] in qto_refs:  # live link to the dimension sheet
+                quantity = f"=SUMIF('{QTO_SHEET}'!$A:$A,A{row},'{QTO_SHEET}'!$M:$M)"
+            values = [line["Ref"], line["Description"], line["Unit"], quantity, float(line["Rate"]), f"=D{row}*E{row}", line["Source"]]
             for col, value in enumerate(values, start=1):
                 cell = ws.cell(row=row, column=col, value=value)
                 cell.border = BORDER
@@ -167,14 +221,17 @@ def to_excel(
     project: dict[str, str] | None = None,
     currency: str = "",
     details: dict[str, pd.DataFrame] | None = None,
+    qto: pd.DataFrame | None = None,
 ) -> bytes:
-    """Summary sheet + one priced bill per discipline (live formulas) + raw take-off sheets."""
+    """Summary sheet + one priced bill per discipline (live formulas) + QTO dimension sheet + raw take-off sheets."""
     df = finalise(df)
     project = project or {}
     wb = Workbook()
     ws = wb.active
     ws.title = "Summary"
-    taken = {"Summary"}
+    taken = {"Summary", QTO_SHEET}
+    has_qto = qto is not None and not qto.empty
+    qto_refs = frozenset(set(qto["BOQ Ref"]) & set(df["Ref"])) if has_qto else frozenset()
 
     ws["A1"] = "BILL OF QUANTITIES"
     ws["A1"].font = Font(bold=True, size=18, color=NAVY)
@@ -192,7 +249,7 @@ def to_excel(
     for n, discipline in enumerate(disciplines, start=1):
         lines = df[df["Discipline"] == discipline]
         sheet = _sheet_name(discipline or "General", taken)
-        total_cell = _write_discipline(wb.create_sheet(sheet), discipline, lines, currency)
+        total_cell = _write_discipline(wb.create_sheet(sheet), discipline, lines, currency, qto_refs)
         row += 1
         for col, value in enumerate([n, discipline, len(lines), f"='{sheet}'!{total_cell}"], start=1):
             cell = ws.cell(row=row, column=col, value=value)
@@ -207,6 +264,8 @@ def to_excel(
     for col, width in zip("ABCD", (22, 40, 10, 22)):
         ws.column_dimensions[col].width = width
 
+    if has_qto:
+        _write_qto(wb.create_sheet(QTO_SHEET), qto)
     _write_table(wb.create_sheet(_sheet_name("All Items", taken)), df)
     for name, table in (details or {}).items():
         if isinstance(table, pd.DataFrame) and not table.empty:

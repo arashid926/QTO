@@ -1,4 +1,4 @@
-"""PDF drawing take-off: scaled vector measurement, tag counting and table extraction."""
+"""PDF drawing take-off: scaled vector measurement, legend reading, tag counting and table extraction."""
 
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ from . import disciplines as dz
 
 PT_TO_MM = 25.4 / 72.0
 FULL_PAGE = (0.0, 0.0, 1.0, 1.0)
+HIGHLIGHT = (236, 0, 140)
+MAX_RENDER_SIDE = 6000  # px; large sheets are rendered at a lower resolution to stay responsive
 
 L, A, C = dz.MEASURE_COLUMNS["Length"], dz.MEASURE_COLUMNS["Area"], dz.MEASURE_COLUMNS["Count"]
 
@@ -28,18 +30,6 @@ def _crop_bbox(page, crop):
     w, h = bx1 - bx0, bbottom - btop
     x0, t0, x1, b0 = crop
     return (bx0 + x0 * w, btop + t0 * h, bx0 + x1 * w, btop + b0 * h)
-
-
-def render_page(data: bytes, page_no: int, crop=FULL_PAGE, resolution: int = 100):
-    """Render a page to a PIL image, outlining the measured region in red."""
-    with pdfplumber.open(io.BytesIO(data)) as pdf:
-        page = pdf.pages[page_no]
-        image = page.to_image(resolution=resolution).original.convert("RGB")
-    if tuple(crop) != FULL_PAGE:
-        w, h = image.size
-        x0, t0, x1, b0 = crop
-        ImageDraw.Draw(image).rectangle([x0 * w, t0 * h, x1 * w, b0 * h], outline=(220, 38, 38), width=4)
-    return image
 
 
 def _hex(colour) -> str:
@@ -71,39 +61,64 @@ def _length(pts) -> float:
     return sum(math.dist(a, b) for a, b in zip(pts, pts[1:]))
 
 
+def _objects(region):
+    """Yield (colour, line width, points, closed) for every vector object, points in page coordinates (top-down)."""
+    def style(obj):
+        filled_only = obj.get("fill") and not obj.get("stroke", True)
+        colour = obj.get("non_stroking_color") if filled_only else obj.get("stroking_color")
+        return _hex(colour), round(float(obj.get("linewidth") or 0), 2)
+
+    for obj in region.lines:
+        pts = [tuple(p) for p in obj.get("pts") or [(obj["x0"], obj["top"]), (obj["x1"], obj["bottom"])]]
+        yield (*style(obj), pts, False)
+    for obj in region.curves:
+        pts = [tuple(p) for p in obj.get("pts") or []]
+        if len(pts) >= 2:
+            yield (*style(obj), pts, len(pts) > 2 and math.dist(pts[0], pts[-1]) < 0.5)
+    for obj in region.rects:
+        x0, t, x1, b = obj["x0"], obj["top"], obj["x1"], obj["bottom"]
+        yield (*style(obj), [(x0, t), (x1, t), (x1, b), (x0, b), (x0, t)], True)
+
+
+def _region(page, crop):
+    return page.within_bbox(_crop_bbox(page, crop)) if tuple(crop) != FULL_PAGE else page
+
+
+def render_page(data: bytes, page_no: int, crop=FULL_PAGE, resolution: int = 100, highlight: tuple = ()):
+    """Render a page, outline the measured region in red and draw the ticked linework groups in magenta."""
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        page = pdf.pages[page_no]
+        image = page.to_image(resolution=resolution).original.convert("RGB")
+        k = resolution / 72.0
+        bx0, btop = page.bbox[0], page.bbox[1]
+        draw = ImageDraw.Draw(image)
+        if highlight:
+            wanted = set(highlight)
+            for colour, width, pts, _closed in _objects(_region(page, crop)):
+                if (colour, width) in wanted:
+                    draw.line([((x - bx0) * k, (y - btop) * k) for x, y in pts], fill=HIGHLIGHT, width=4)
+    if tuple(crop) != FULL_PAGE:
+        w, h = image.size
+        x0, t0, x1, b0 = crop
+        draw.rectangle([x0 * w, t0 * h, x1 * w, b0 * h], outline=(220, 38, 38), width=4)
+    return image
+
+
 def measure_vectors(data: bytes, page_no: int, scale: float, crop=FULL_PAGE) -> pd.DataFrame:
-    """Measure lines, curves and rectangles on a page, grouped by stroke colour and line weight.
+    """Measure lines, curves and rectangles on a page, grouped by colour and line weight.
 
     `scale` is the drawing scale denominator (100 for 1:100) at the PDF's paper size.
     """
     k = PT_TO_MM * scale / 1000.0  # PDF points -> metres on site
     rows = []
     with pdfplumber.open(io.BytesIO(data)) as pdf:
-        page = pdf.pages[page_no]
-        region = page.within_bbox(_crop_bbox(page, crop)) if tuple(crop) != FULL_PAGE else page
-
-        def add(obj, pts, closed):
-            colour = obj.get("stroking_color") if obj.get("stroke", True) else obj.get("non_stroking_color")
+        for colour, width, pts, closed in _objects(_region(pdf.pages[page_no], crop)):
             rows.append({
-                "Colour": _hex(colour),
-                "Line width": round(float(obj.get("linewidth") or 0), 2),
-                "Length": _length(pts) * k,
-                "Area": _shoelace(pts) * k * k if closed else 0.0,
-                "Closed": closed,
+                "Colour": colour, "Line width": width, "Length": _length(pts) * k,
+                "Area": _shoelace(pts) * k * k if closed else 0.0, "Closed": closed,
             })
 
-        for obj in region.lines:
-            pts = [tuple(p) for p in obj.get("pts") or [(obj["x0"], obj["top"]), (obj["x1"], obj["bottom"])]]
-            add(obj, pts, False)
-        for obj in region.curves:
-            pts = [tuple(p) for p in obj.get("pts") or []]
-            if len(pts) >= 2:
-                add(obj, pts, len(pts) > 2 and math.dist(pts[0], pts[-1]) < 0.5)
-        for obj in region.rects:
-            x0, t, x1, b = obj["x0"], obj["top"], obj["x1"], obj["bottom"]
-            add(obj, [(x0, t), (x1, t), (x1, b), (x0, b), (x0, t)], True)
-
-    columns = ["Bill", "Discipline", "Work Section", "Measure", "Description", "Colour", "Line width", C, L, A]
+    columns = ["Bill", "Discipline", "Work Section", "Measure", "Description", "Factor", dz.DIM_COLUMN, "Colour", "Line width", C, L, A]
     df = pd.DataFrame(rows, columns=["Colour", "Line width", "Length", "Area", "Closed"])
     if df.empty:
         return pd.DataFrame(columns=columns)
@@ -117,8 +132,82 @@ def measure_vectors(data: bytes, page_no: int, scale: float, crop=FULL_PAGE) -> 
     g["Bill"] = False
     g["Discipline"], g["Work Section"] = dz.DEFAULT_CLASS
     g["Description"] = [f"Linework {c} @ {w} pt" for c, w in zip(g["Colour"], g["Line width"])]
+    g["Factor"] = 1.0
+    g[dz.DIM_COLUMN] = 0.0
     g = g.rename(columns={"Length": L, "Area": A})
     return g[columns].reset_index(drop=True)
+
+
+def read_legend(data: bytes, page_no: int, region=FULL_PAGE) -> pd.DataFrame:
+    """Pair each legend swatch (short line, hatch sample or filled box) with the text written to its right."""
+    entries: dict[str, str] = {}
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        area = _region(pdf.pages[page_no], region)
+        width = area.bbox[2] - area.bbox[0]
+        words = area.extract_words()
+        for colour, _w, pts, _closed in _objects(area):
+            xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+            if colour in entries or colour == "other" or max(xs) - min(xs) > 0.25 * width or max(ys) - min(ys) > 40:
+                continue
+            right, middle = max(xs), (min(ys) + max(ys)) / 2
+            tolerance = max(4.0, (max(ys) - min(ys)) / 2 + 2)
+            line = sorted(
+                (w for w in words if abs((w["top"] + w["bottom"]) / 2 - middle) <= tolerance and right - 1 <= w["x0"] <= right + 120),
+                key=lambda w: w["x0"],
+            )
+            label, last = [], None
+            for w in line:
+                if last is not None and w["x0"] - last > 15:
+                    break
+                label.append(w["text"])
+                last = w["x1"]
+            if label:
+                entries[colour] = " ".join(label)
+    return pd.DataFrame([{"Colour": c, "Label": t} for c, t in entries.items()], columns=["Colour", "Label"])
+
+
+def apply_legend(vectors: pd.DataFrame, legend: pd.DataFrame) -> pd.DataFrame:
+    """Name linework groups after the legend entry of the same colour and classify them from that name."""
+    labels = dict(zip(legend["Colour"], legend["Label"]))
+    out = vectors.copy()
+    for i, colour in out["Colour"].items():
+        label = labels.get(colour)
+        if not label:
+            continue
+        discipline, section = dz.classify(label)
+        out.at[i, "Description"] = label
+        out.at[i, "Discipline"], out.at[i, "Work Section"] = discipline, section
+        out.at[i, "Bill"] = True
+        if dz.suggest_count(label):
+            out.at[i, "Measure"] = "Count"
+    return out
+
+
+def snap_points(data: bytes, page_no: int, limit: int = 40_000) -> list[tuple[float, float]]:
+    """Line ends and corners of the vector drawing, in page points from the top-left, for snapping."""
+    seen, out = set(), []
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        page = pdf.pages[page_no]
+        bx0, btop = page.bbox[0], page.bbox[1]
+        for _c, _w, pts, _closed in _objects(page):
+            for x, y in pts:
+                key = (round(x - bx0, 1), round(y - btop, 1))
+                if key not in seen:
+                    seen.add(key)
+                    out.append(key)
+                    if len(out) >= limit:
+                        return out
+    return out
+
+
+def render_for_measure(data: bytes, page_no: int, dpi: int = 110):
+    """(image, pixels per PDF point) for on-screen measuring; very large sheets get a lower resolution."""
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        page = pdf.pages[page_no]
+        longest = max(page.width, page.height)
+        dpi = min(dpi, int(MAX_RENDER_SIDE * 72 / longest))
+        image = page.to_image(resolution=dpi).original.convert("RGB")
+    return image, image.size[0] / float(page.width)
 
 
 def count_tags(data: bytes, tags: list[str], pages: list[int] | None = None) -> pd.DataFrame:

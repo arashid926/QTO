@@ -78,6 +78,10 @@ MEASURE_COLUMNS = {
     "Weight": "Weight (kg)",
 }
 MEASURE_UNITS = {"Count": "nr", "Length": "m", "Area": "m²", "Volume": "m³", "Weight": "kg"}
+# Optional take-off columns: Factor (e.g. 0.5 for walls drawn as two lines) and a second dimension
+# that turns a length into an area (wall height) or an area into a volume (slab thickness).
+DIM_COLUMN = "× Height/Thk (m)"
+NEXT_UNIT = {"m": "m²", "m²": "m³"}
 UNITS = ["nr", "m", "m²", "m³", "kg", "t", "item", "sum", "hr", "day", "week"]
 
 # Keywords matched case-insensitively inside layer, block, object or description names.

@@ -156,49 +156,50 @@ def _match_section(text: str) -> str | None:
     return next((s for s in dz.NRM2_SECTIONS if low in s.lower()), None)
 
 
+# Example items only: no rates, pricing comes from the user's rate library.
 TEMPLATES = {
     "Architectural": [
-        ("A-001", "200 mm thick blockwork wall in cement mortar 1:4", "m²", 450, 65, "14 Masonry"),
-        ("A-002", "Ceramic floor tiles 600x600 mm on 40 mm screed", "m²", 320, 85, "28 Floor, wall, ceiling and roof finishings"),
-        ("A-003", "Single leaf timber flush door 900x2100 mm complete", "nr", 24, 1250, "24 Doors, shutters and hatches"),
-        ("A-004", "Aluminium sliding window 1500x1200 mm double glazed", "nr", 18, 1800, "23 Windows, screens and lights"),
-        ("A-005", "Emulsion paint, two coats on plastered walls", "m²", 1400, 18, "29 Decoration"),
-        ("A-006", "Gypsum board suspended ceiling 600x600 mm", "m²", 300, 75, "30 Suspended ceilings"),
+        ("A-001", "200 mm thick blockwork wall in cement mortar 1:4", "m²", 450, "14 Masonry"),
+        ("A-002", "Ceramic floor tiles 600x600 mm on 40 mm screed", "m²", 320, "28 Floor, wall, ceiling and roof finishings"),
+        ("A-003", "Single leaf timber flush door 900x2100 mm complete", "nr", 24, "24 Doors, shutters and hatches"),
+        ("A-004", "Aluminium sliding window 1500x1200 mm double glazed", "nr", 18, "23 Windows, screens and lights"),
+        ("A-005", "Emulsion paint, two coats on plastered walls", "m²", 1400, "29 Decoration"),
+        ("A-006", "Gypsum board suspended ceiling 600x600 mm", "m²", 300, "30 Suspended ceilings"),
     ],
     "Structural": [
-        ("S-001", "Plain concrete C15 blinding 50 mm thick", "m³", 12, 380, "11 In-situ concrete works"),
-        ("S-002", "Reinforced concrete C35 in isolated footings", "m³", 85, 620, "11 In-situ concrete works"),
-        ("S-003", "Reinforced concrete C40 in columns", "m³", 38, 700, "11 In-situ concrete works"),
-        ("S-004", "Reinforced concrete C40 in suspended slabs 200 mm", "m³", 145, 650, "11 In-situ concrete works"),
-        ("S-005", "High yield steel reinforcement bars B500B", "t", 42, 3800, "11 In-situ concrete works"),
-        ("S-006", "Formwork to soffits of slabs", "m²", 720, 55, "11 In-situ concrete works"),
+        ("S-001", "Plain concrete C15 blinding 50 mm thick", "m³", 12, "11 In-situ concrete works"),
+        ("S-002", "Reinforced concrete C35 in isolated footings", "m³", 85, "11 In-situ concrete works"),
+        ("S-003", "Reinforced concrete C40 in columns", "m³", 38, "11 In-situ concrete works"),
+        ("S-004", "Reinforced concrete C40 in suspended slabs 200 mm", "m³", 145, "11 In-situ concrete works"),
+        ("S-005", "High yield steel reinforcement bars B500B", "t", 42, "11 In-situ concrete works"),
+        ("S-006", "Formwork to soffits of slabs", "m²", 720, "11 In-situ concrete works"),
     ],
     "Civil": [
-        ("C-001", "Site clearance and removal of topsoil 150 mm", "m²", 2500, 6, "05 Excavating and filling"),
-        ("C-002", "Excavation for foundations not exceeding 2 m deep", "m³", 640, 28, "05 Excavating and filling"),
-        ("C-003", "Approved backfill compacted in 250 mm layers", "m³", 410, 35, "05 Excavating and filling"),
-        ("C-004", "Disposal of surplus excavated material off site", "m³", 230, 22, "05 Excavating and filling"),
-        ("C-005", "Anti-termite soil treatment", "m²", 900, 9, "06 Ground remediation and soil stabilisation"),
-        ("C-006", "Chain link fence 2.1 m high on steel posts", "m", 220, 140, "36 Fencing"),
+        ("C-001", "Site clearance and removal of topsoil 150 mm", "m²", 2500, "05 Excavating and filling"),
+        ("C-002", "Excavation for foundations not exceeding 2 m deep", "m³", 640, "05 Excavating and filling"),
+        ("C-003", "Approved backfill compacted in 250 mm layers", "m³", 410, "05 Excavating and filling"),
+        ("C-004", "Disposal of surplus excavated material off site", "m³", 230, "05 Excavating and filling"),
+        ("C-005", "Anti-termite soil treatment", "m²", 900, "06 Ground remediation and soil stabilisation"),
+        ("C-006", "Chain link fence 2.1 m high on steel posts", "m", 220, "36 Fencing"),
     ],
     "MEP": [
-        ("M-001", "uPVC soil pipe 110 mm dia. including fittings", "m", 180, 75, "33 Drainage above ground"),
-        ("M-002", "PPR cold water pipe 25 mm dia.", "m", 420, 32, "38 Mechanical services"),
-        ("M-003", "Ducted split AC unit 5 TR complete", "nr", 6, 18500, "38 Mechanical services"),
-        ("M-004", "LED panel light 600x600 mm 40 W", "nr", 140, 260, "39 Electrical services"),
-        ("M-005", "13 A twin switched socket outlet", "nr", 95, 120, "39 Electrical services"),
-        ("M-006", "XLPE armoured cable 4C x 16 mm²", "m", 350, 95, "39 Electrical services"),
+        ("M-001", "uPVC soil pipe 110 mm dia. including fittings", "m", 180, "33 Drainage above ground"),
+        ("M-002", "PPR cold water pipe 25 mm dia.", "m", 420, "38 Mechanical services"),
+        ("M-003", "Ducted split AC unit 5 TR complete", "nr", 6, "38 Mechanical services"),
+        ("M-004", "LED panel light 600x600 mm 40 W", "nr", 140, "39 Electrical services"),
+        ("M-005", "13 A twin switched socket outlet", "nr", 95, "39 Electrical services"),
+        ("M-006", "XLPE armoured cable 4C x 16 mm²", "m", 350, "39 Electrical services"),
     ],
     "Infrastructure": [
-        ("I-001", "Asphalt wearing course 50 mm thick", "m²", 3200, 48, "35 Site works"),
-        ("I-002", "Aggregate road base 250 mm thick compacted", "m²", 3200, 36, "35 Site works"),
-        ("I-003", "Precast concrete kerb 150x300 mm", "m", 860, 65, "35 Site works"),
-        ("I-004", "uPVC sewer pipe 200 mm dia. in trench", "m", 540, 210, "34 Drainage below ground"),
-        ("I-005", "Precast concrete manhole 1200 mm dia., 2.5 m deep", "nr", 14, 6800, "34 Drainage below ground"),
-        ("I-006", "Street light pole 8 m with LED luminaire", "nr", 26, 4200, "39 Electrical services"),
+        ("I-001", "Asphalt wearing course 50 mm thick", "m²", 3200, "35 Site works"),
+        ("I-002", "Aggregate road base 250 mm thick compacted", "m²", 3200, "35 Site works"),
+        ("I-003", "Precast concrete kerb 150x300 mm", "m", 860, "35 Site works"),
+        ("I-004", "uPVC sewer pipe 200 mm dia. in trench", "m", 540, "34 Drainage below ground"),
+        ("I-005", "Precast concrete manhole 1200 mm dia., 2.5 m deep", "nr", 14, "34 Drainage below ground"),
+        ("I-006", "Street light pole 8 m with LED luminaire", "nr", 26, "39 Electrical services"),
     ],
 }
 
 
 def template(discipline: str) -> pd.DataFrame:
-    return pd.DataFrame(TEMPLATES[discipline], columns=["Item No", "Description", "Unit", "Qty", "Rate", "Work Section"])
+    return pd.DataFrame(TEMPLATES[discipline], columns=["Item No", "Description", "Unit", "Qty", "Work Section"])
