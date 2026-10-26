@@ -191,7 +191,7 @@ def snap_points(data: bytes, page_no: int, limit: int = 40_000) -> list[tuple[fl
         bx0, btop = page.bbox[0], page.bbox[1]
         for _c, _w, pts, _closed in _objects(page):
             for x, y in pts:
-                key = (round(x - bx0, 1), round(y - btop, 1))
+                key = (round(x - bx0, 3), round(y - btop, 3))
                 if key not in seen:
                     seen.add(key)
                     out.append(key)

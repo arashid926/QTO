@@ -1,9 +1,10 @@
-"""On-screen take-off: measurement items, the QTO dimension sheet and its link to the BOQ.
+"""On-screen take-off: buildings, measurement items (dimension groups), the QTO dimension sheet and its BOQ link.
 
 Works like a QS dimension sheet: every measurement is a row with timesing, dimensions and a signed
-quantity (deductions are negative); each take-off item becomes one BOQ line whose quantity is the
-sum of its rows. Points are stored in drawing units (PDF points, or pixels of an image drawing) so
-they stay valid when the page is rendered at a different resolution.
+quantity (deductions are negative). Each take-off item is a dimension group; its BOQ line quantity is
+the sum of its rows, either for the whole project or separately for each building. Points are stored
+in drawing units (PDF points, DXF image pixels or scan pixels) so they stay valid when the page is
+rendered at a different resolution.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ PT_TO_M = 25.4 / 72.0 / 1000.0  # one PDF point on paper, in metres
 SOURCE = "On-screen QTO"
 
 QTO_COLUMNS = [
-    "BOQ Ref", "Description", "Drawing", "Page", "Location", "Type", "Timesing", "Deduct",
+    "BOQ Ref", "Description", "Building", "Level", "Drawing", "Page", "Location", "Type", "Timesing", "Deduct",
     "Measured", "Width/Height (m)", "Depth/Thk (m)", "Unit", "Quantity", "Shape",
 ]
 
@@ -52,12 +53,48 @@ PRESETS = {
 
 
 def new_state() -> dict:
-    return {"items": [], "shapes": [], "calibration": {}, "seen": []}
+    return {
+        "items": [], "shapes": [], "calibration": {}, "seen": [],
+        "buildings": [{"id": 1, "code": "B01", "name": "Building 1"}],
+        "split_buildings": True,  # one BOQ line per item per building (when there is more than one building)
+    }
 
 
 def page_key(doc: str, page: int) -> str:
     return f"{doc}|{page}"
 
+
+# ---------------------------------------------------------------- buildings
+
+def add_building(state: dict, name: str) -> dict:
+    n = max((b["id"] for b in state["buildings"]), default=0) + 1
+    building = {"id": n, "code": f"B{n:02d}", "name": name.strip() or f"Building {n}"}
+    state["buildings"].append(building)
+    return building
+
+
+def building_by_id(state: dict, building_id: int) -> dict:
+    return next((b for b in state["buildings"] if b["id"] == building_id), state["buildings"][0])
+
+
+def delete_building(state: dict, building_id: int) -> bool:
+    """Remove an empty building. Buildings that still hold measurements are kept."""
+    if len(state["buildings"]) <= 1 or any(s.get("building") == building_id for s in state["shapes"]):
+        return False
+    state["buildings"] = [b for b in state["buildings"] if b["id"] != building_id]
+    return True
+
+
+def splitting(state: dict) -> bool:
+    return bool(state.get("split_buildings", True)) and len(state["buildings"]) > 1
+
+
+def line_ref(state: dict, item: dict, building_id: int) -> str:
+    """BOQ ref of an item's line: TO-001, or TO-001-B02 when bills are split by building."""
+    return f"{item['ref']}-{building_by_id(state, building_id)['code']}" if splitting(state) else item["ref"]
+
+
+# ---------------------------------------------------------------- items (dimension groups)
 
 def item_unit(kind: str, width: float, depth: float) -> str:
     if kind == "Count":
@@ -73,11 +110,10 @@ def add_item(state: dict, description: str, discipline: str, section: str, kind:
     item = {
         "id": n, "ref": f"TO-{n:03d}", "description": description.strip() or f"Take-off item {n}",
         "discipline": discipline, "section": section, "type": kind,
-        "width": float(width or 0), "depth": float(depth or 0) if kind != "Count" else 0.0,
-        "colour": PALETTE[(n - 1) % len(PALETTE)],
+        "width": float(width or 0) if kind == "Length" else 0.0,
+        "depth": float(depth or 0) if kind != "Count" else 0.0,
+        "colour": PALETTE[(n - 1) % len(PALETTE)], "visible": True, "rate": 0.0,
     }
-    if kind != "Length":
-        item["width"] = 0.0
     state["items"].append(item)
     return item
 
@@ -85,6 +121,8 @@ def add_item(state: dict, description: str, discipline: str, section: str, kind:
 def item_by_id(state: dict, item_id: int) -> dict | None:
     return next((i for i in state["items"] if i["id"] == item_id), None)
 
+
+# ---------------------------------------------------------------- scale and measurements
 
 def metres_per_unit_from_scale(ratio: float) -> float:
     """Drawing scale 1:ratio on a PDF at its paper size -> metres per PDF point."""
@@ -96,11 +134,11 @@ def calibrate(points: list, known_metres: float) -> float | None:
     return known_metres / d if d > 0 and known_metres > 0 else None
 
 
-def add_shape(state: dict, item_id: int, doc: str, page: int, points: list) -> dict:
+def add_shape(state: dict, item_id: int, doc: str, page: int, points: list, building: int = 1, level: str = "") -> dict:
     shape = {
         "id": uuid.uuid4().hex[:10], "item_id": item_id, "doc": doc, "page": page,
         "points": [[round(float(x), 3), round(float(y), 3)] for x, y in points],
-        "timesing": 1.0, "deduct": False, "location": "",
+        "timesing": 1.0, "deduct": False, "location": "", "building": building, "level": level,
     }
     state["shapes"].append(shape)
     return shape
@@ -137,17 +175,22 @@ def quantity(shape: dict, item: dict, m_per_unit: float | None) -> float | None:
     return value * float(shape.get("timesing") or 1.0) * (-1.0 if shape.get("deduct") else 1.0)
 
 
+# ---------------------------------------------------------------- dimension sheet and BOQ
+
 def qto_sheet(state: dict) -> pd.DataFrame:
-    """The dimension sheet: one row per measurement, grouped by take-off item."""
+    """The dimension sheet: one row per measurement, grouped by take-off item then building."""
     rows = []
     for item in state["items"]:
-        for shape in (s for s in state["shapes"] if s["item_id"] == item["id"]):
+        order = {b["id"]: n for n, b in enumerate(state["buildings"])}
+        shapes = sorted((s for s in state["shapes"] if s["item_id"] == item["id"]), key=lambda s: order.get(s.get("building", 1), 0))
+        for shape in shapes:
             mpu = state["calibration"].get(page_key(shape["doc"], shape["page"]))
             value = measured(shape, item, mpu)
             qty = quantity(shape, item, mpu)
             rows.append({
-                "BOQ Ref": item["ref"], "Description": item["description"], "Drawing": shape["doc"],
-                "Page": shape["page"] + 1, "Location": shape.get("location", ""), "Type": item["type"],
+                "BOQ Ref": line_ref(state, item, shape.get("building", 1)), "Description": item["description"],
+                "Building": building_by_id(state, shape.get("building", 1))["name"], "Level": shape.get("level", ""),
+                "Drawing": shape["doc"], "Page": shape["page"] + 1, "Location": shape.get("location", ""), "Type": item["type"],
                 "Timesing": float(shape.get("timesing") or 1.0), "Deduct": bool(shape.get("deduct")),
                 "Measured": None if value is None else round(value, 3),
                 "Width/Height (m)": item["width"] if item["type"] == "Length" and item["width"] else None,
@@ -160,8 +203,9 @@ def qto_sheet(state: dict) -> pd.DataFrame:
 
 
 def update_from_sheet(state: dict, sheet: pd.DataFrame) -> bool:
-    """Apply edits made in the dimension sheet (timesing, deduct, location, deleted rows). Returns True if changed."""
+    """Apply edits made in the dimension sheet (timesing, deduct, location, building, level, deleted rows)."""
     by_id = {s["id"]: s for s in state["shapes"]}
+    by_name = {b["name"]: b["id"] for b in state["buildings"]}
     keep = set(sheet["Shape"].dropna())
     changed = len(keep) != len(by_id)
     state["shapes"] = [s for s in state["shapes"] if s["id"] in keep]
@@ -170,44 +214,93 @@ def update_from_sheet(state: dict, sheet: pd.DataFrame) -> bool:
         if shape is None:
             continue
         timesing = float(row["Timesing"]) if pd.notna(row["Timesing"]) and row["Timesing"] > 0 else 1.0
-        new = {"timesing": timesing, "deduct": bool(row["Deduct"]), "location": "" if pd.isna(row["Location"]) else str(row["Location"])}
+        new = {
+            "timesing": timesing, "deduct": bool(row["Deduct"]),
+            "location": "" if pd.isna(row["Location"]) else str(row["Location"]),
+            "level": "" if pd.isna(row.get("Level", "")) else str(row.get("Level", "")),
+            "building": by_name.get(row.get("Building"), shape.get("building", 1)),
+        }
         if any(shape.get(k) != v for k, v in new.items()):
             shape.update(new)
             changed = True
     return changed
 
 
+def group_totals(state: dict) -> pd.DataFrame:
+    """Net quantity of every dimension group, per building."""
+    rows = []
+    for item in state["items"]:
+        for building in state["buildings"]:
+            shapes = [s for s in state["shapes"] if s["item_id"] == item["id"] and s.get("building", 1) == building["id"]]
+            if not shapes:
+                continue
+            qtys = [quantity(s, item, state["calibration"].get(page_key(s["doc"], s["page"]))) for s in shapes]
+            rows.append({
+                "Item": item["ref"], "Description": item["description"], "Building": building["name"],
+                "Measurements": len(shapes), "Quantity": round(sum(q for q in qtys if q is not None), 3),
+                "Unit": item_unit(item["type"], item["width"], item["depth"]),
+            })
+    return pd.DataFrame(rows, columns=["Item", "Description", "Building", "Measurements", "Quantity", "Unit"])
+
+
 def boq_lines(state: dict) -> pd.DataFrame:
-    """One BOQ line per take-off item, quantity = net total of its dimension-sheet rows."""
+    """BOQ lines: quantity = net total of the item's dimension rows (per building when bills are split)."""
     sheet = qto_sheet(state)
     rows = []
     for item in state["items"]:
-        part = sheet[sheet["BOQ Ref"] == item["ref"]]
-        total = part["Quantity"].dropna().sum()
-        if part.empty or total <= 0:
-            continue
-        rows.append({
-            "Ref": item["ref"], "Discipline": item["discipline"], "Work Section": item["section"],
-            "Description": item["description"], "Unit": item_unit(item["type"], item["width"], item["depth"]),
-            "Quantity": round(float(total), 3), "Rate": 0.0, "Source": SOURCE,
-        })
+        groups = [(b, line_ref(state, item, b["id"])) for b in state["buildings"]] if splitting(state) else [(None, item["ref"])]
+        for building, ref in groups:
+            total = sheet.loc[sheet["BOQ Ref"] == ref, "Quantity"].dropna().sum()
+            if total <= 0:
+                continue
+            description = item["description"] + (f" — {building['name']}" if building else "")
+            rows.append({
+                "Ref": ref, "Discipline": item["discipline"], "Work Section": item["section"],
+                "Description": description, "Unit": item_unit(item["type"], item["width"], item["depth"]),
+                "Quantity": round(float(total), 3), "Rate": float(item.get("rate") or 0.0), "Source": SOURCE,
+            })
     return pd.DataFrame(rows, columns=["Ref", "Discipline", "Work Section", "Description", "Unit", "Quantity", "Rate", "Source"])
 
 
+# ---------------------------------------------------------------- files
+
+def upgrade(state: dict) -> dict:
+    """Fill in fields added in later versions so older take-off files keep working."""
+    state.setdefault("seen", [])
+    state.setdefault("calibration", {})
+    state.setdefault("split_buildings", True)
+    if not state.get("buildings"):
+        state["buildings"] = [{"id": 1, "code": "B01", "name": "Building 1"}]
+    for item in state.setdefault("items", []):
+        item.setdefault("visible", True)
+        item.setdefault("rate", 0.0)
+    for shape in state.setdefault("shapes", []):
+        shape.setdefault("building", state["buildings"][0]["id"])
+        shape.setdefault("level", "")
+    return state
+
+
 def to_json(state: dict) -> bytes:
-    data = {k: state[k] for k in ("items", "shapes", "calibration")}
-    return json.dumps({"format": "qto-studio-takeoff", "version": 1, **data}, indent=1).encode("utf-8")
+    data = {k: state[k] for k in ("items", "shapes", "calibration", "buildings", "split_buildings")}
+    return json.dumps({"format": "qto-studio-takeoff", "version": 2, **data}, indent=1).encode("utf-8")
 
 
 def from_json(raw: bytes) -> dict:
     data = json.loads(raw.decode("utf-8"))
     if data.get("format") != "qto-studio-takeoff":
         raise ValueError("This is not a QTO Studio take-off file.")
+    return from_dict(data)
+
+
+def from_dict(data: dict) -> dict:
     state = new_state()
     state["items"] = list(data.get("items", []))
     state["shapes"] = list(data.get("shapes", []))
     state["calibration"] = {k: float(v) for k, v in data.get("calibration", {}).items()}
-    return state
+    if data.get("buildings"):
+        state["buildings"] = list(data["buildings"])
+    state["split_buildings"] = bool(data.get("split_buildings", True))
+    return upgrade(state)
 
 
 def image_data_url(image, quality: int = 82) -> str:

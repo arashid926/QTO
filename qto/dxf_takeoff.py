@@ -257,7 +257,7 @@ def render_image(result: DxfResult, max_side: int = 4000, margin: int = 40):
                 if len(run) > 1:
                     draw.line(run, fill=(20, 20, 20), width=2)
                 for p in (run[:1] + run[-1:]) if len(run) > 12 else run:  # vertices, not every arc segment
-                    key = (round(p[0], 1), round(p[1], 1))
+                    key = (round(p[0], 3), round(p[1], 3))
                     if key not in seen and len(snap) < 80_000:
                         seen.add(key)
                         snap.extend(key)
@@ -267,7 +267,7 @@ def render_image(result: DxfResult, max_side: int = 4000, margin: int = 40):
     for x, y in zip(result.markers["X"], result.markers["Y"]):
         cx, cy = to_px(x, y)
         draw.rectangle([cx - 5, cy - 5, cx + 5, cy + 5], outline=(37, 99, 235), width=2)
-        snap.extend((round(cx, 1), round(cy, 1)))
+        snap.extend((round(cx, 3), round(cy, 3)))
     return image, 1.0 / px_per_m, snap
 
 

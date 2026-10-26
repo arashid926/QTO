@@ -317,7 +317,7 @@ function finish() {
   pts = mode === "count" ? pts : dedupe(pts);
   const need = { count: 1, line: 2, area: 3, calibrate: 2 }[mode];
   if (!need || pts.length < need) return;
-  setValue({ event: mode === "calibrate" ? "calibrate" : "add", kind: mode, points: pts.map((q) => [+q[0].toFixed(2), +q[1].toFixed(2)]), id: uid() });
+  setValue({ event: mode === "calibrate" ? "calibrate" : "add", kind: mode, points: pts.map((q) => [+q[0].toFixed(3), +q[1].toFixed(3)]), id: uid() });
   pts = []; draw();
 }
 

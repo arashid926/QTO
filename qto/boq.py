@@ -117,42 +117,43 @@ QTO_SHEET = "QTO Sheet"
 
 
 def _write_qto(ws, sheet: pd.DataFrame) -> None:
-    """Dimension sheet with live formulas; BOQ quantities link to column M through SUMIF on the ref."""
+    """Dimension sheet with live formulas; BOQ quantities link to column O through SUMIF on the ref."""
     ws["A1"] = "QTO / Dimension Sheet"
     ws["A1"].font = Font(bold=True, size=14, color=NAVY)
     ws["A2"] = "Quantity = Timesing × Measured × Width/Height × Depth/Thickness (deductions negative)"
     ws["A2"].font = Font(italic=True, color="64748B")
-    headers = ["BOQ Ref", "Description", "Drawing", "Page", "Location", "Type", "Timesing", "Deduct",
+    headers = ["BOQ Ref", "Description", "Building", "Level", "Drawing", "Page", "Location", "Type", "Timesing", "Deduct",
                "Measured", "Width/Height (m)", "Depth/Thk (m)", "Unit", "Quantity"]
     _header(ws, 4, headers)
+    text = lambda v: None if v is None or (isinstance(v, float) and pd.isna(v)) or v == "" else v  # noqa: E731
     row = 5
     for ref, group in sheet.groupby("BOQ Ref", sort=False):
         first = row
         for _, r in group.iterrows():
             values = [
-                ref, r["Description"], r["Drawing"], int(r["Page"]), r["Location"] or None, r["Type"],
-                float(r["Timesing"]), "Yes" if r["Deduct"] else "No",
+                ref, r["Description"], text(r.get("Building")), text(r.get("Level")), r["Drawing"], int(r["Page"]),
+                text(r["Location"]), r["Type"], float(r["Timesing"]), "Yes" if r["Deduct"] else "No",
                 None if pd.isna(r["Measured"]) else float(r["Measured"]),
                 None if pd.isna(r["Width/Height (m)"]) else float(r["Width/Height (m)"]),
                 None if pd.isna(r["Depth/Thk (m)"]) else float(r["Depth/Thk (m)"]),
                 r["Unit"],
-                f'=IF(H{row}="Yes",-1,1)*G{row}*N(I{row})*IF(N(J{row})>0,J{row},1)*IF(N(K{row})>0,K{row},1)',
+                f'=IF(J{row}="Yes",-1,1)*I{row}*N(K{row})*IF(N(L{row})>0,L{row},1)*IF(N(M{row})>0,M{row},1)',
             ]
             for col, value in enumerate(values, start=1):
                 ws.cell(row=row, column=col, value=value).border = BORDER
-            for col in (9, 13):
+            for col in (11, 15):
                 ws.cell(row=row, column=col).number_format = QTY_FMT
             if r["Deduct"]:
-                ws.cell(row=row, column=13).font = Font(color="DC2626")
+                ws.cell(row=row, column=15).font = Font(color="DC2626")
             row += 1
         ws.cell(row=row, column=2, value=f"Total carried to BOQ item {ref}").font = Font(bold=True)
-        ws.cell(row=row, column=12, value=group["Unit"].iloc[0]).font = Font(bold=True)
-        total = ws.cell(row=row, column=13, value=f"=SUM(M{first}:M{row - 1})")
+        ws.cell(row=row, column=14, value=group["Unit"].iloc[0]).font = Font(bold=True)
+        total = ws.cell(row=row, column=15, value=f"=SUM(O{first}:O{row - 1})")
         total.font, total.number_format = Font(bold=True), QTY_FMT
-        for col in range(1, 14):
+        for col in range(1, 16):
             ws.cell(row=row, column=col).fill = PatternFill("solid", fgColor=PALE)
         row += 2
-    for col, width in zip("ABCDEFGHIJKLM", (10, 40, 22, 6, 18, 8, 9, 8, 12, 14, 13, 6, 13)):
+    for col, width in zip("ABCDEFGHIJKLMNO", (12, 38, 16, 8, 20, 6, 16, 8, 9, 8, 12, 14, 13, 6, 13)):
         ws.column_dimensions[col].width = width
     ws.freeze_panes = "A5"
 
@@ -172,7 +173,7 @@ def _write_discipline(ws, discipline: str, lines: pd.DataFrame, currency: str, q
         for _, line in group.iterrows():
             quantity = float(line["Quantity"])
             if line["Ref"] in qto_refs:  # live link to the dimension sheet
-                quantity = f"=SUMIF('{QTO_SHEET}'!$A:$A,A{row},'{QTO_SHEET}'!$M:$M)"
+                quantity = f"=SUMIF('{QTO_SHEET}'!$A:$A,A{row},'{QTO_SHEET}'!$O:$O)"
             values = [line["Ref"], line["Description"], line["Unit"], quantity, float(line["Rate"]), f"=D{row}*E{row}", line["Source"]]
             for col, value in enumerate(values, start=1):
                 cell = ws.cell(row=row, column=col, value=value)
