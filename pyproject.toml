@@ -1,0 +1,11 @@
+[project]
+name = "qto-studio"
+version = "0.1.0"
+description = "Quantity take-off from 2D drawings, 3D BIM models and schedules into an NRM2 Bill of Quantities"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
