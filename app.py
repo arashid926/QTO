@@ -92,6 +92,9 @@ div[data-testid="stTabs"] div[data-testid="stPopover"] button {padding: .2rem .3
 .st-key-rb_home div[data-testid="stColumn"], .st-key-rb_home div[data-testid="column"],
 .st-key-rb_file div[data-testid="stColumn"], .st-key-rb_file div[data-testid="column"] {flex: 0 0 auto !important; width: auto !important; min-width: 0 !important;}
 .st-key-qto_ribbon button p {white-space: nowrap !important; overflow: visible !important; text-overflow: clip !important;}
+.st-key-rb_home div[data-testid="stHorizontalBlock"] {gap: .15rem !important;}
+.st-key-rb_home div[data-testid="stButton"] button {padding: .05rem .2rem !important;}
+.st-key-rb_home div[data-testid="stVerticalBlockBorderWrapper"] {padding: .15rem .25rem .25rem !important;}
 .st-key-rb_home button div[data-testid="stMarkdownContainer"], .st-key-rb_file button div[data-testid="stMarkdownContainer"]
   {overflow: visible; text-overflow: clip; max-width: none;}
 /* Streamlit's own top bar: slim and see-through so it does not cover the title bar */
