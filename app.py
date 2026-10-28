@@ -81,16 +81,23 @@ div[data-testid="stTabs"] div[data-testid="stPopover"] button {padding: .2rem .3
 .st-key-qto_ribbon div[data-testid="stButton"] button, .st-key-qto_ribbon div[data-testid="stDownloadButton"] button,
 .st-key-qto_ribbon div[data-testid="stPopover"] button {padding: .05rem .25rem; min-height: 1.65rem; font-size: .7rem; line-height: 1.05;}
 .st-key-qto_ribbon div[data-testid="stButton"] button p, .st-key-qto_ribbon div[data-testid="stDownloadButton"] button p,
-.st-key-qto_ribbon div[data-testid="stPopover"] button p {font-size: .7rem;}
+.st-key-qto_ribbon div[data-testid="stPopover"] button p {font-size: 1.05rem; line-height: 1;}
+/* icon tools: square, centred; the name shows in the tooltip */
+.st-key-qto_ribbon div[data-testid="stButton"] button, .st-key-qto_ribbon div[data-testid="stDownloadButton"] button,
+.st-key-qto_ribbon div[data-testid="stPopover"] button, .st-key-qto_bar div[data-testid="stButton"] button
+  {min-width: 2.1rem; min-height: 2.1rem !important; justify-content: center;}
+.st-key-qto_ribbon div[data-testid="stToggle"] label p {font-size: 1.05rem !important;}
 .st-key-qto_ribbon div[data-testid="stVerticalBlockBorderWrapper"] {padding: .15rem .35rem .3rem; border-radius: 6px;}
 .st-key-qto_ribbon div[data-testid="stCaptionContainer"] p {font-size: .6rem; letter-spacing: .06em; margin: 0; line-height: 1;}
 .st-key-qto_ribbon div[data-baseweb="select"] > div, .st-key-qto_ribbon input {min-height: 1.75rem; font-size: .75rem;}
 .st-key-qto_ribbon div[data-baseweb="select"] > div > div {padding-top: 0; padding-bottom: 0;}
 .st-key-qto_ribbon div[data-testid="stRadio"] label p, .st-key-qto_ribbon div[data-testid="stToggle"] label p {font-size: .75rem;}
 /* Home and File ribbons: each group and button as wide as its label; groups wrap to a new line instead of cutting labels */
-.st-key-rb_home div[data-testid="stHorizontalBlock"], .st-key-rb_file div[data-testid="stHorizontalBlock"] {flex-wrap: wrap;}
+.st-key-rb_home div[data-testid="stHorizontalBlock"], .st-key-rb_file div[data-testid="stHorizontalBlock"],
+.st-key-rb_tools div[data-testid="stHorizontalBlock"] {flex-wrap: wrap;}
 .st-key-rb_home div[data-testid="stColumn"], .st-key-rb_home div[data-testid="column"],
-.st-key-rb_file div[data-testid="stColumn"], .st-key-rb_file div[data-testid="column"] {flex: 0 0 auto !important; width: auto !important; min-width: 0 !important;}
+.st-key-rb_file div[data-testid="stColumn"], .st-key-rb_file div[data-testid="column"],
+.st-key-rb_tools div[data-testid="stColumn"], .st-key-rb_tools div[data-testid="column"] {flex: 0 0 auto !important; width: auto !important; min-width: 0 !important;}
 .st-key-qto_ribbon button p {white-space: nowrap !important; overflow: visible !important; text-overflow: clip !important;}
 .st-key-rb_home div[data-testid="stHorizontalBlock"] {gap: .15rem !important;}
 .st-key-rb_home div[data-testid="stButton"] button {padding: .05rem .2rem !important;}
@@ -102,8 +109,8 @@ header[data-testid="stHeader"] {height: 2.1rem; min-height: 2.1rem; background: 
 .block-container {padding-top: 2.2rem;}
 .titlebar {white-space: nowrap; overflow: hidden; padding: .3rem .9rem; margin-bottom: 0;}
 .titlebar span {overflow: hidden; text-overflow: ellipsis; min-width: 0;}
-.st-key-qto_bar div[data-testid="stButton"] button {padding: 0 .4rem; min-height: 1.9rem; font-size: .75rem;}
-.st-key-qto_bar div[data-testid="stButton"] button p {font-size: .75rem;}
+.st-key-qto_bar div[data-testid="stButton"] button {padding: 0 .3rem;}
+.st-key-qto_bar div[data-testid="stButton"] button p {font-size: 1.05rem; line-height: 1;}
 .statusbar {background: #0f172a; color: #e2e8f0; font-size: .8rem; padding: .3rem .8rem; border-radius: 8px; margin-top: .25rem;}
 .statusbar b {color: #7dd3fc;}
 div[data-testid="stMetric"] {background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: .6rem .9rem;}
@@ -127,6 +134,14 @@ NAV = ["🖼️ Drawing View", "📒 Workbook View", "🗂️ Dimension View", "
 T_MEASURE, T_SIMILAR, T_LEN, T_AREA, T_SELECT, T_CAL = (
     "✏️ Measure", "🎯 Select similar", "📐 Check length", "⬛ Check area", "🖐 Select / pan", "📏 Calibrate")
 TOOLS = [T_MEASURE, T_SIMILAR, T_LEN, T_AREA, T_SELECT, T_CAL]
+TOOL_TIPS = {
+    T_MEASURE: "Measure the active dimension group on the drawing",
+    T_SIMILAR: "Click one object — every matching block / line / outline is measured",
+    T_LEN: "Check a length without billing it",
+    T_AREA: "Check an area and perimeter without billing it",
+    T_SELECT: "Select a measurement (Delete removes it) or drag to pan",
+    T_CAL: "Click both ends of a known dimension, then type its real length",
+}
 
 
 def set_tool(tool: str):
@@ -933,11 +948,11 @@ FILE_MENU = [
 def ribbon_file() -> None:
     cols = st.columns(len(FILE_MENU) + 1)
     for col, (icon, name, dialog) in zip(cols, FILE_MENU):
-        if col.button(f"{icon} {name}", key=f"file_{name}", use_container_width=True, help=name):
+        if tool(col, icon, name, f"file_{name}"):
             dialog()
     snapshot = project.snapshot(ss)
-    cols[-1].download_button("💾 Save", project.to_bytes(snapshot), file_name=project.file_name(snapshot), mime="application/json",
-                             use_container_width=True, help="Download the whole project to open again later — the server keeps nothing")
+    cols[-1].download_button("💾", project.to_bytes(snapshot), file_name=project.file_name(snapshot), mime="application/json",
+                             use_container_width=True, help="**Save** — download the whole project to open again later; the server keeps nothing")
 
 
 def globals_form() -> None:
@@ -1422,83 +1437,90 @@ def dlg_administration() -> None:
                     st.rerun()
 
 
+def tool(where, icon: str, name: str, key: str, tip: str = "", **kw) -> bool:
+    """A ribbon tool drawn as its icon only; the name (and what it does) appears when the mouse is over it."""
+    return where.button(icon, key=key, help=f"**{name}**" + (f" — {tip}" if tip else ""), use_container_width=True, **kw)
+
+
+def tool_group(title: str, n: int):
+    """A framed ribbon group with a small title and n tool slots."""
+    box = st.container(border=True)
+    box.caption(title)
+    return box.columns(n)
+
+
 def ribbon_home(issue_count: int) -> None:
     """Groups like a desktop take-off package: Drawing · View · Measure · Workbooks · Format & Administration.
-    The groups size to their buttons and wrap to a second line on narrow screens (see the rb_home CSS)."""
+    Tools are icons; hover for the name. Groups size to their tools and wrap on narrow screens (rb_home CSS)."""
     g_draw, g_view, g_measure, g_work, g_admin = st.columns(5)
-    with g_draw.container(border=True):
-        st.caption("DRAWING")
-        c = st.columns(3)
-        if c[0].button("🗺️ Drawing", key="h_draw", use_container_width=True, help="Open a drawing"):
+    with g_draw:
+        c = tool_group("DRAWING", 3)
+        if tool(c[0], "🗺️", "Drawing", "h_draw", "Open a drawing"):
             dlg_drawing_pick()
-        if c[1].button("ℹ️ Property", key="h_dprop", use_container_width=True, help="Drawing properties, rename, remove"):
+        if tool(c[1], "ℹ️", "Drawing property", "h_dprop", "Rename, check scale, remove"):
             dlg_property()
-        if c[2].button("🔍 Compare", key="h_cmp", use_container_width=True, help="Overlay two drawings or revisions"):
+        if tool(c[2], "🔀", "Compare", "h_cmp", "Overlay two drawings or revisions: red removed, blue added"):
             dlg_compare()
-    with g_view.container(border=True):
-        st.caption("VIEW")
-        c = st.columns(11)
-        c[0].button("👁️ All Layers", key="h_all", use_container_width=True, on_click=layers_cmd, args=("all",))
-        c[1].button("🔄 Invert Layers", key="h_inv", use_container_width=True, on_click=layers_cmd, args=("invert",))
-        if c[2].button("📑 File Layers", key="h_lay", use_container_width=True):
+    with g_view:
+        c = tool_group("VIEW", 11)
+        tool(c[0], "👁️", "All layers", "h_all", "Switch every DXF layer on", on_click=layers_cmd, args=("all",))
+        tool(c[1], "🔄", "Invert layers", "h_inv", "Visible layers off, hidden layers on", on_click=layers_cmd, args=("invert",))
+        if tool(c[2], "📑", "File layers", "h_lay", "Choose the layers to show"):
             dlg_layers()
-        for col, (label, name, tip) in zip(c[3:], [
-            ("🖐 Pan", "pan", "Drag the drawing (P); click again or Esc to stop"), ("➕ Zoom In", "zoom_in", "+ or mouse wheel"),
-            ("➖ Zoom Out", "zoom_out", "− or mouse wheel"), ("🔍 Zoom Area", "window", "Then drag a box on the drawing (W)"),
-            ("⛶ Zoom Extent", "extents", "Fit the drawn content (E)"), ("⤢ Zoom All", "all", "The whole sheet (A)"),
-            ("↻ Rotate 90", "rotate", "Turn the view; measurements stay correct"), ("🎯 Reset View", "reset", "Unrotate and fit the sheet"),
+        for col, (icon, name, cmd, tip) in zip(c[3:], [
+            ("🖐", "Pan", "pan", "Drag the drawing (P); click again or Esc to stop"), ("➕", "Zoom in", "zoom_in", "+ or mouse wheel"),
+            ("➖", "Zoom out", "zoom_out", "− or mouse wheel"), ("🔍", "Zoom area", "window", "Then drag a box on the drawing (W)"),
+            ("⛶", "Zoom extent", "extents", "Fit the drawn content (E)"), ("⤢", "Zoom all", "all", "The whole sheet (A)"),
+            ("↻", "Rotate 90°", "rotate", "Turn the view; measurements stay correct"), ("🎯", "Reset view", "reset", "Unrotate and fit the sheet"),
         ]):
-            col.button(label, key=f"h_v_{name}", use_container_width=True, on_click=view_cmd, args=(name,), help=tip)
-    with g_admin.container(border=True):
-        st.caption("FORMAT & ADMINISTRATION")
-        c = st.columns(3)
-        if c[0].button("🎨 Format", key="h_fmt", use_container_width=True):
-            dlg_format()
-        if c[1].button("🛡️ Administration", key="h_admin", use_container_width=True):
-            dlg_administration()
-        c[2].button(f"✅ {issue_count} errors" if issue_count else "✅ Check", key="h_check", use_container_width=True,
-                    type="primary" if issue_count else "secondary", on_click=go_to, args=(NAV[3],), help="Project check and self-test")
-    with g_measure.container(border=True):
-        st.caption("MEASURE")
-        c = st.columns(9)
-        if c[0].button("➕ Add", key="h_m_add", use_container_width=True, help="New dimension group"):
+            tool(col, icon, name, f"h_v_{cmd}", tip, on_click=view_cmd, args=(cmd,))
+    with g_measure:
+        c = tool_group("MEASURE", 9)
+        if tool(c[0], "🆕", "Add dimension group", "h_m_add", "Footing, wall, slab… or a simple count / length / area"):
             new_item_dialog()
-        if c[1].button("⚙️ Property", key="h_m_prop", use_container_width=True, disabled=not ss.get("mt_active")):
+        if tool(c[1], "⚙️", "Group property", "h_m_prop", "Parameters of the active dimension group", disabled=not ss.get("mt_active")):
             item_dialog(ss.mt_active)
-        if c[2].button("📤 Export", key="h_m_exp", use_container_width=True):
+        if tool(c[2], "📤", "Export dimensions", "h_m_exp", "Group totals, dimension sheet, derived items, take-off file"):
             dlg_export_dims()
         neg = bool(ss.get("mt_deduct"))
-        c[3].button("➕ +ve", key="h_pos", use_container_width=True, type="secondary" if neg else "primary", on_click=sign_cmd, args=("+",),
-                    help="New measurements add to the quantity")
-        c[4].button("➖ −ve", key="h_neg", use_container_width=True, type="primary" if neg else "secondary", on_click=sign_cmd, args=("-",),
-                    help="New measurements are deductions")
-        c[5].button("± Both", key="h_both", use_container_width=True, type="primary" if ss.mt_show == "Both" else "secondary",
-                    on_click=show_both_cmd, help="Show +ve and −ve measurements (off: only the current sign)")
-        c[6].button("📏 Line", key="h_line", use_container_width=True, on_click=set_tool, args=(T_LEN,), help="Dimension line to check a length")
-        if c[7].button("✍️ Add manual", key="h_manual", use_container_width=True):
+        tool(c[3], "⊕", "+ve", "h_pos", "New measurements add to the quantity", type="secondary" if neg else "primary",
+             on_click=sign_cmd, args=("+",))
+        tool(c[4], "⊖", "−ve", "h_neg", "New measurements are deductions", type="primary" if neg else "secondary",
+             on_click=sign_cmd, args=("-",))
+        tool(c[5], "±", "Show both", "h_both", "Show +ve and −ve measurements (off: only the current sign)",
+             type="primary" if ss.mt_show == "Both" else "secondary", on_click=show_both_cmd)
+        tool(c[6], "📏", "Dimension line", "h_line", "Check a length without billing it", on_click=set_tool, args=(T_LEN,))
+        if tool(c[7], "✍️", "Add manual dimension", "h_manual", "Type a quantity taken from a section or schedule"):
             dlg_manual()
-        if c[8].button("✅ Accept All", key="h_accept", use_container_width=True, help="Auto count every block / mark on this drawing"):
+        if tool(c[8], "✅", "Accept all", "h_accept", "Auto count every block / mark on this drawing"):
             dlg_accept_all()
-    with g_work.container(border=True):
-        st.caption("WORKBOOKS")
-        c = st.columns(6)
-        if c[0].button("➕ Add", key="h_w_add", use_container_width=True, help="Add a BOQ line (from the code library)"):
+    with g_work:
+        c = tool_group("WORKBOOKS", 6)
+        if tool(c[0], "📝", "Add BOQ line", "h_w_add", "From the code library or typed"):
             dlg_boq_add()
-        if c[1].button("🧾 Properties", key="h_w_prop", use_container_width=True):
+        if tool(c[1], "🧾", "Properties", "h_w_prop", "Project details, parameters, buildings & levels"):
             dlg_project_property()
-        if c[2].button("📊 Reports", key="h_w_rep", use_container_width=True):
+        if tool(c[2], "📊", "Reports", "h_w_rep", "Excel BOQ, QTO workbook, CSV"):
             dlg_export()
-        if c[3].button("🔤 Spelling", key="h_w_spell", use_container_width=True):
+        if tool(c[3], "🔤", "Spelling", "h_w_spell", "Check BOQ and group descriptions"):
             dlg_spelling()
-        c[4].button("🔁 Recalc", key="h_w_recalc", use_container_width=True, on_click=recalc_cmd)
-        if c[5].button("ƒ Function", key="h_w_fn", use_container_width=True):
+        tool(c[4], "🔁", "Recalc", "h_w_recalc", "Recalculate amounts, derived items and the self-test", on_click=recalc_cmd)
+        if tool(c[5], "ƒ", "Function", "h_w_fn", "Location factor, markup, rounding, subcontractor rates, custom quantities"):
             dlg_function()
+    with g_admin:
+        c = tool_group("FORMAT & ADMIN", 3)
+        if tool(c[0], "🎨", "Format", "h_fmt", "Decimals, text case, report header"):
+            dlg_format()
+        if tool(c[1], "🛡️", "Administration", "h_admin", "Projects and the office libraries (codes, zones, variables, units…)"):
+            dlg_administration()
+        tool(c[2], "🩺", "Project check", "h_check", f"{issue_count} error(s) — open the check" if issue_count else "No errors — self-test and checks",
+             type="primary" if issue_count else "secondary", on_click=go_to, args=(NAV[3],))
 
 
 def ribbon_drawings() -> None:
     mt = ss.mt
-    c = st.columns([1.1, 2.4, 0.8, 1, 0.8, 1.1, 1.5])
-    with c[0].popover("📂 Drawings", use_container_width=True):
+    c = st.columns([0.5, 2.4, 0.8, 1, 0.45, 0.45, 0.6], vertical_alignment="center")
+    with c[0].popover("📂", use_container_width=True, help="**Drawings** — add PDF, DXF or scanned plans, load the sample, remove"):
         uploads = st.file_uploader("Add drawings (PDF, DXF, PNG/JPG scans)", type=["pdf", "dxf", "png", "jpg", "jpeg"],
                                    accept_multiple_files=True, key="up_files")
         new = [f for f in uploads or [] if f.name not in ss.files]
@@ -1534,13 +1556,15 @@ def ribbon_drawings() -> None:
     c[2].selectbox("Page", list(range(1, pages + 1)), key=f"mt_pg_{doc}", label_visibility="collapsed",
                    format_func=lambda p: f"Page {p}")
     c[3].selectbox("Detail", ["Standard", "Fine", "Draft"], key="mt_dpi", disabled=not is_pdf, label_visibility="collapsed")
-    c[4].toggle("Snap", ss.opts["snap"], key="mt_snap", disabled=not (is_pdf or is_dxf), help="Snap clicks to line ends and corners")
-    c[5].toggle("Offsets", ss.opts["offsets"], key="mt_guides", help="Show extended perimeters: footing face, blinding edge (dashed blue) "
-                                                       "and excavation edge (dotted orange) around foundation items")
+    c[4].toggle("🧲", ss.opts["snap"], key="mt_snap", disabled=not (is_pdf or is_dxf), help="**Snap** — clicks snap to line ends and corners")
+    c[5].toggle("⬚", ss.opts["offsets"], key="mt_guides", help="**Offsets** — show extended perimeters: footing face, blinding edge "
+                                                    "(dashed blue) and excavation edge (dotted orange) around foundation items")
     page = int(ss.get(f"mt_pg_{doc}", 1)) - 1
     pkey = measure.page_key(doc, page)
     mpu = mt["calibration"].get(pkey)
-    with c[6].popover(("📏 Scale ✓" if mpu or is_dxf else "📏 Set scale ⚠"), use_container_width=True):
+    scaled = bool(mpu or is_dxf)
+    with c[6].popover("📏✓" if scaled else "📏⚠", use_container_width=True,
+                      help="**Scale** — set" if scaled else "**Scale** — not set yet: calibrate or enter the drawing scale"):
         if mpu:
             shown = f"1 : {mpu / measure.PT_TO_M:,.0f}" if is_pdf else "exact, from DXF units" if is_dxf else f"{mpu * 1000:.2f} mm per pixel"
             st.success(f"Scale set — {shown}")
@@ -1559,15 +1583,19 @@ def ribbon_dimension() -> None:
     mt = ss.mt
     if "pending_tool" in ss:  # set by the File → Import dialog
         ss.mt_tool = ss.pop("pending_tool")
-    t = st.columns([8, 1, 1, 1], vertical_alignment="center")
-    t[0].radio("Tool", TOOLS, key="mt_tool", horizontal=True, label_visibility="collapsed",
-               help="Measure the active item · Select similar objects · Check a length or area without billing it · Select/pan · Calibrate")
-    for col, (label, name, tip) in zip(t[1:], [("↶ Undo", "undo", "Remove the last point (Backspace)"),
-                                              ("✔ Finish", "finish", "Finish the measurement (Enter / double-click)"),
-                                              ("✕ Cancel", "cancel", "Cancel the measurement in progress (Esc)")]):
-        col.button(label, key=f"d_{name}", use_container_width=True, on_click=view_cmd, args=(name,), help=tip)
-    b = st.columns([2.2, 1, 1.4, 4])
-    if b[1].button("➕ Building", use_container_width=True):
+    if ss.get("mt_tool") not in TOOLS:
+        ss.mt_tool = T_MEASURE
+    t = st.container(key="rb_tools").columns(len(TOOLS) + 3)
+    for col, tool_name in zip(t, TOOLS):  # measuring tools: the active one is highlighted
+        icon, _, name = tool_name.partition(" ")
+        tool(col, icon, name, f"d_t_{name}", TOOL_TIPS[tool_name], type="primary" if ss.mt_tool == tool_name else "secondary",
+             on_click=set_tool, args=(tool_name,))
+    for col, (icon, name, cmd, tip) in zip(t[len(TOOLS):], [("↶", "Undo", "undo", "Remove the last point (Backspace)"),
+                                                          ("✔", "Finish", "finish", "Finish the measurement (Enter / double-click)"),
+                                                          ("✕", "Cancel", "cancel", "Cancel the measurement in progress (Esc)")]):
+        tool(col, icon, name, f"d_{cmd}", tip, on_click=view_cmd, args=(cmd,))
+    b = st.columns([2.2, 0.5, 1.4, 4])
+    if tool(b[1], "🏢", "Add building", "d_building", "Villa, block, car park… levels are copied from the first building"):
         building_dialog()
     if "pending_building" in ss:
         ss.mt_building = ss.pop("pending_building")
@@ -1582,8 +1610,8 @@ def ribbon_dimension() -> None:
         zones.append(ss.mt_level)
     b[2].selectbox("Level / zone", zones, key="mt_level", format_func=lambda z: z or "Level / zone…", label_visibility="collapsed",
                    help="Zone for new measurements — the list is Administration → Standard Zones")
-    c = st.columns([0.01, 3.2, 1, 1, 0.9, 0.9, 1.6])
-    if c[2].button("➕ New item", use_container_width=True):
+    c = st.columns([0.01, 3.2, 0.5, 0.5, 0.9, 0.6, 1.6], vertical_alignment="center")
+    if tool(c[2], "🆕", "Add dimension group", "d_new", "Footing, wall, slab… or a simple count / length / area"):
         new_item_dialog()
     if "pending_active" in ss:
         ss.mt_active = ss.pop("pending_active")
@@ -1593,13 +1621,13 @@ def ribbon_dimension() -> None:
     if ids:
         c[1].selectbox("Measuring", ids, format_func=lambda i: item_label(measure.item_by_id(mt, i)), key="mt_active",
                        label_visibility="collapsed")
-        if c[3].button("⚙️ Item", use_container_width=True):
+        if tool(c[3], "⚙️", "Group property", "d_prop", "Parameters of the dimension group being measured"):
             item_dialog(ss.mt_active)
     else:
-        c[1].caption("No items yet — click ➕ New item")
+        c[1].caption("No dimension groups yet — click 🆕")
     c[4].number_input("× Times", 0.01, 1000.0, 1.0, step=1.0, key="mt_times", label_visibility="collapsed",
                       help="Timesing for the next measurements, e.g. 4 for four identical floors")
-    c[5].toggle("Deduct", key="mt_deduct", help="Next measurements are subtracted (openings) — same as Home → −ve")
+    c[5].toggle("⊖", key="mt_deduct", help="**Deduct** — next measurements are subtracted (openings); same as Home → −ve")
     c[6].text_input("Location", key="mt_loc", placeholder="Location / wall ref", label_visibility="collapsed",
                     help="Grid or location; for blockwork, the wall reference (e.g. W-01)")
 
@@ -1654,15 +1682,15 @@ def item_params_form(item: dict | None) -> None:
 def ribbon_workbook() -> None:
     mt = ss.mt
     lines = measure.boq_lines(mt)
-    c = st.columns([1.3, 1.4, 1.2, 1.2, 1.4, 2])
-    if c[0].button("📤 Send to BOQ", type="primary", use_container_width=True, disabled=lines.empty):
+    c = st.columns([0.5, 0.5, 0.5, 0.5, 0.5, 0.4, 5], vertical_alignment="center")
+    if tool(c[0], "📤", "Send to BOQ", "w_send", "Put the measured and derived quantities into the BOQ", type="primary", disabled=lines.empty):
         send_takeoff_to_boq()
-    c[1].download_button("⬇️ QTO workbook", full_export(lines.drop(columns="Key")) if not lines.empty else b"",
+    c[1].download_button("⬇️", full_export(lines.drop(columns="Key")) if not lines.empty else b"",
                          file_name="QTO_workbook.xlsx", mime=XLSX_MIME, disabled=lines.empty, use_container_width=True,
-                         help="Dimension sheet, derived items with formulas, wall schedule and a linked BOQ")
-    c[2].download_button("💾 Take-off", measure.to_json(mt), file_name="takeoff.qto.json", mime="application/json",
-                         disabled=not mt["items"], use_container_width=True, help="Only the take-off; File → Save keeps everything")
-    with c[3].popover("📂 Take-off", use_container_width=True):
+                         help="**QTO workbook** — dimension sheet, derived items with formulas, wall schedule and a linked BOQ")
+    c[2].download_button("💾", measure.to_json(mt), file_name="takeoff.qto.json", mime="application/json",
+                         disabled=not mt["items"], use_container_width=True, help="**Save take-off** — only the take-off; File → Save keeps everything")
+    with c[3].popover("📂", use_container_width=True, help="**Open take-off** — load a saved take-off file"):
         saved = st.file_uploader("Saved take-off (.json)", type=["json"], key="mt_open")
         if saved is not None and st.button("Load (replaces current take-off)", key="mt_open_go"):
             try:
@@ -1674,8 +1702,9 @@ def ribbon_workbook() -> None:
                 st.rerun()
             except (ValueError, KeyError) as exc:
                 st.error(f"Could not open this file: {exc}")
-    c[4].button("💰 Price from library", use_container_width=True, on_click=go_to, args=(NAV[8],))
-    split = c[5].toggle("Separate lines per building", mt.get("split_buildings", True), key=f"wb_split_{ss.mt_ver}")
+    tool(c[4], "💰", "Price from library", "w_price", "Apply rate library rates in BOQ & Reports", on_click=go_to, args=(NAV[8],))
+    split = c[5].toggle("🏢", mt.get("split_buildings", True), key=f"wb_split_{ss.mt_ver}",
+                        help="**Separate lines per building** — off: one combined BOQ line per item")
     if split != mt.get("split_buildings", True):
         mt["split_buildings"] = split
         ss.mt_ver += 1
@@ -1785,7 +1814,7 @@ def view_drawing(highlight: list[str] | None = None) -> None:
     doc, page = current_drawing()
     if doc is None:
         st.info("**Start here:** Drawings tab → 📂 Drawings → add a PDF, DXF or scanned plan, or ✨ Load sample plan. "
-                "Then Dimension tab → ➕ New item (e.g. *Isolated footing*), and click on the drawing.")
+                "Then Dimension tab → 🆕 (Add dimension group) (e.g. *Isolated footing*), and click on the drawing.")
         return
     data = ss.files[doc]
     is_pdf = doc.lower().endswith(".pdf")
@@ -1830,7 +1859,7 @@ def view_drawing(highlight: list[str] | None = None) -> None:
     elif tool == T_CAL:
         st.info("📏 **Calibrate:** click both ends of a dimension you know (a grid line or a dimensioned wall), then type its real length.")
     if tool in (T_MEASURE, T_SIMILAR) and not active:
-        st.info("Dimension tab → ➕ New item first (e.g. *Isolated footing* or *Blockwork wall*), then click on the drawing.")
+        st.info("Dimension tab → 🆕 (Add dimension group) first (e.g. *Isolated footing* or *Blockwork wall*), then click on the drawing.")
     if "sim_msg" in ss:
         st.toast(ss.pop("sim_msg"), icon="🎯")
 
@@ -1929,9 +1958,9 @@ def view_dimension() -> None:
             if not is_dxf(doc):
                 st.caption("Layers are available on DXF drawings. PDFs and scans are flat images.")
             else:
-                a, b = st.columns(2)
-                a.button("👁️ Show all", key="dv_lay_all", use_container_width=True, on_click=layers_cmd, args=("all",))
-                b.button("🔄 Invert", key="dv_lay_inv", use_container_width=True, on_click=layers_cmd, args=("invert",))
+                a, b, _ = st.columns([1, 1, 3])
+                tool(a, "👁️", "All layers", "dv_lay_all", "Switch every layer on", on_click=layers_cmd, args=("all",))
+                tool(b, "🔄", "Invert layers", "dv_lay_inv", "Visible layers off, hidden layers on", on_click=layers_cmd, args=("invert",))
                 new_hidden = layers_editor(doc, "dv_layers")
                 if new_hidden is not None:
                     ss.hidden_layers[doc] = new_hidden
@@ -1946,13 +1975,12 @@ def view_dimension() -> None:
                     st.rerun()
             st.button("➕ Upload in 3D Models", key="dv_model_up", on_click=go_to, args=(NAV[5],), use_container_width=True)
         with t_view:
-            a, b = st.columns(2)
-            a.button("🎯 Reset", key="dv_reset", use_container_width=True, on_click=view_cmd, args=("reset",))
-            b.button("↻ Rotate 90", key="dv_rot", use_container_width=True, on_click=view_cmd, args=("rotate",))
-            a.button("⛶ Extents", key="dv_ext", use_container_width=True, on_click=view_cmd, args=("extents",))
-            b.button("🔍 Zoom area", key="dv_area", use_container_width=True, on_click=view_cmd, args=("window",))
-            a.button("± Both signs" if ss.mt_show == "Both" else "± One sign", key="dv_both", use_container_width=True,
-                     on_click=show_both_cmd)
+            c = st.columns(5)
+            for col, (icon, name, cmd) in zip(c, [("🎯", "Reset view", "reset"), ("↻", "Rotate 90°", "rotate"),
+                                                  ("⛶", "Zoom extent", "extents"), ("🔍", "Zoom area", "window")]):
+                tool(col, icon, name, f"dv_{cmd}", on_click=view_cmd, args=(cmd,))
+            tool(c[4], "±", "Show both signs", "dv_both", "On: +ve and −ve shown · off: only the current sign",
+                 type="primary" if ss.mt_show == "Both" else "secondary", on_click=show_both_cmd)
 
         t_dims, t_auto = st.tabs(["🗂️ Dimensions", "🔢 Auto Count"])
         with t_dims:
@@ -1970,7 +1998,7 @@ def dimension_groups_panel(doc: str | None) -> list[str] | None:
     """Table of dimension groups; clicking one makes it active and returns its measurement ids to highlight."""
     mt = ss.mt
     if not mt["items"]:
-        st.caption("No dimension groups yet — Home → Measure → ➕ Add.")
+        st.caption("No dimension groups yet — Home → Measure → 🆕.")
         return None
     totals = measure.group_totals(mt)
     rows = []
@@ -2489,7 +2517,7 @@ def view_dashboard() -> None:
     if data.empty:
         steps = [
             ("1 · Drawings", "Drawings tab → 📂 add PDF, DXF or scans (or the sample plan) and set the scale."),
-            ("2 · Items", "Dimension tab → ➕ New item: pick an assembly such as Isolated footing or Blockwork wall."),
+            ("2 · Items", "Dimension tab → 🆕 (Add dimension group): pick an assembly such as Isolated footing or Blockwork wall."),
             ("3 · Measure", "Click on the drawing. Excavation, blinding, concrete, formwork, backfill… are generated automatically."),
             ("4 · Check & bill", "✅ Project Check, then Workbook → 📤 Send to BOQ, price it and export to Excel."),
         ]
@@ -2538,16 +2566,17 @@ if ss.ribbon_min or maximised:  # the ribbon is still drawn (its settings stay a
     st.markdown("<style>.st-key-qto_ribbon {display: none;}</style>", unsafe_allow_html=True)
 with st.container(key="qto_bar"):
     on_drawing = ss.nav in (NAV[0], NAV[2])
-    t, quick, b1, b2 = st.columns([5.2, 6.8, 1.1, 1.3] if on_drawing else [11.9, 0.1, 1.1, 1.3], vertical_alignment="center")
+    t, quick, b1, b2 = st.columns([5.6, 6.8, 0.55, 0.55] if on_drawing else [12.3, 0.1, 0.55, 0.55], vertical_alignment="center")
     if on_drawing:  # quick-access drawing tools: always in reach, also with the ribbon minimised or the drawing maximised
         for col, (icon, name, tip) in zip(quick.columns(len(QUICK_TOOLS)), QUICK_TOOLS):
             col.button(icon, key=f"qa_{name}", use_container_width=True, help=tip, on_click=view_cmd, args=(name,))
     t.markdown(f"<div class='titlebar'><b>📐 QTO Studio</b><span>{ss.p_name}</span><span>·</span><span>{ss.nav}</span>"
                f"<span>·</span><span>{doc_name or 'no drawing'}{f' p{page_no + 1}' if doc_name else ''}</span></div>", unsafe_allow_html=True)
-    b1.button("▾ Ribbon" if ss.ribbon_min else "▴ Ribbon", key="bar_ribbon", use_container_width=True, disabled=maximised,
-              on_click=toggle_ui, args=("ribbon_min",), help="Show / minimise the ribbon (tools stay as you left them)")
-    b2.button("🗗 Restore" if maximised else "⛶ Maximise", key="bar_max", use_container_width=True, on_click=toggle_ui, args=("ui_max",),
-              help="Drawing fills the window: hides the side rail and the ribbon. Measuring keys still work (Enter, Esc, +/−).")
+    tool(b1, "▾" if ss.ribbon_min else "▴", "Show ribbon" if ss.ribbon_min else "Minimise ribbon", "bar_ribbon",
+         "Tools stay as you left them", disabled=maximised, on_click=toggle_ui, args=("ribbon_min",))
+    tool(b2, "🗗" if maximised else "🔲", "Restore" if maximised else "Maximise drawing", "bar_max",
+         "Side rail and ribbon come back" if maximised else "Drawing fills the window; measuring keys still work (Enter, Esc, +/−)",
+         on_click=toggle_ui, args=("ui_max",))
 
 with st.container(key="qto_ribbon"):
     r_file, r_home, r_draw, r_dim, r_wb = st.tabs(["File", "Home", "Drawings", "Dimension", "Workbook"])
