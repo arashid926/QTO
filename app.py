@@ -20,7 +20,7 @@ from PIL import Image, ImageOps
 # Streamlit Cloud re-runs app.py after a git update but can keep old copies of the qto package in memory,
 # which then fail against the new app.py. Reload the package (dependencies first) whenever a source file
 # changed, and once when this process first runs this code.
-QTO_MODULES = ["qto", "qto.disciplines", "qto.geometry", "qto.assemblies", "qto.selftest", "qto.schedules", "qto.boq", "qto.rates",
+QTO_MODULES = ["qto", "qto.disciplines", "qto.geometry", "qto.assemblies", "qto.selftest", "qto.schedules", "qto.boq", "qto.admin", "qto.rates",
                "qto.measure", "qto.project", "qto.pdf_takeoff", "qto.dxf_takeoff", "qto.ifc_takeoff", "qto.mesh_takeoff",
                "qto.samples", "qto.canvas"]
 
@@ -49,6 +49,11 @@ def _reload_changed_modules() -> None:
 
 _reload_changed_modules()
 
+import uuid  # noqa: E402
+
+import numpy as np  # noqa: E402
+
+from qto import admin  # noqa: E402
 from qto import __version__, boq, dxf_takeoff, geometry, ifc_takeoff, measure, mesh_takeoff, pdf_takeoff, project, rates, samples, schedules, selftest
 from qto import assemblies as asm  # noqa: E402
 from qto import disciplines as dz  # noqa: E402
@@ -69,6 +74,21 @@ section[data-testid="stSidebar"] {min-width: 230px !important; max-width: 270px 
 div[data-testid="stTabs"] div[data-testid="stButton"] button, div[data-testid="stTabs"] div[data-testid="stDownloadButton"] button,
 div[data-testid="stTabs"] div[data-testid="stPopover"] button {padding: .2rem .35rem; min-height: 2.3rem; font-size: .8rem;
   line-height: 1.15; white-space: normal;}
+/* compact ribbon: small icon buttons, slim group frames, tight rows */
+.st-key-qto_ribbon .stTabs [data-baseweb="tab"] {padding: .1rem .7rem; font-size: .8rem; min-height: 1.6rem;}
+.st-key-qto_ribbon [data-baseweb="tab-panel"] {padding-top: .3rem;}
+.st-key-qto_ribbon div[data-testid="stVerticalBlock"], .st-key-qto_ribbon div[data-testid="stHorizontalBlock"] {gap: .25rem;}
+.st-key-qto_ribbon div[data-testid="stButton"] button, .st-key-qto_ribbon div[data-testid="stDownloadButton"] button,
+.st-key-qto_ribbon div[data-testid="stPopover"] button {padding: .05rem .25rem; min-height: 1.65rem; font-size: .7rem; line-height: 1.05;}
+.st-key-qto_ribbon div[data-testid="stButton"] button p, .st-key-qto_ribbon div[data-testid="stDownloadButton"] button p,
+.st-key-qto_ribbon div[data-testid="stPopover"] button p {font-size: .7rem;}
+.st-key-qto_ribbon div[data-testid="stVerticalBlockBorderWrapper"] {padding: .15rem .35rem .3rem; border-radius: 6px;}
+.st-key-qto_ribbon div[data-testid="stCaptionContainer"] p {font-size: .6rem; letter-spacing: .06em; margin: 0; line-height: 1;}
+.st-key-qto_ribbon div[data-baseweb="select"] > div, .st-key-qto_ribbon input {min-height: 1.75rem; font-size: .75rem;}
+.st-key-qto_ribbon div[data-baseweb="select"] > div > div {padding-top: 0; padding-bottom: 0;}
+.st-key-qto_ribbon div[data-testid="stRadio"] label p, .st-key-qto_ribbon div[data-testid="stToggle"] label p {font-size: .75rem;}
+.st-key-qto_bar div[data-testid="stButton"] button {padding: 0 .4rem; min-height: 1.9rem; font-size: .75rem;}
+.st-key-qto_bar div[data-testid="stButton"] button p {font-size: .75rem;}
 .statusbar {background: #0f172a; color: #e2e8f0; font-size: .8rem; padding: .3rem .8rem; border-radius: 8px; margin-top: .25rem;}
 .statusbar b {color: #7dd3fc;}
 div[data-testid="stMetric"] {background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: .6rem .9rem;}
@@ -87,7 +107,7 @@ CHART_MARGIN = dict(t=40, l=0, r=0, b=0)
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 MEASURABLE = (".pdf", ".dxf", ".png", ".jpg", ".jpeg")
 
-NAV = ["🖼️ Drawing View", "📒 Workbook View", "🗂️ Dimension Group View", "✅ Project Check",
+NAV = ["🖼️ Drawing View", "📒 Workbook View", "🗂️ Dimension View", "✅ Project Check",
        "📏 2D Auto Take-off", "🧊 3D Models", "📋 Schedules", "💰 Rate Library", "📑 BOQ & Reports", "🏠 Dashboard"]
 T_MEASURE, T_SIMILAR, T_LEN, T_AREA, T_SELECT, T_CAL = (
     "✏️ Measure", "🎯 Select similar", "📐 Check length", "⬛ Check area", "🖐 Select / pan", "📏 Calibrate")
@@ -97,7 +117,8 @@ TOOLS = [T_MEASURE, T_SIMILAR, T_LEN, T_AREA, T_SELECT, T_CAL]
 def set_tool(tool: str):
     """Button callback: switch the measuring tool (runs before the tool selector is drawn)."""
     ss.mt_tool = tool
-    ss.nav = NAV[0]
+    if ss.nav != NAV[2]:  # the Dimension View has its own drawing
+        ss.nav = NAV[0]
 
 ss = st.session_state
 for key, value in {"boq": boq.empty(), "boq_ver": 0, "details": {}, "rates": rates.empty(), "rates_ver": 0, "rate_report": None,
@@ -105,11 +126,18 @@ for key, value in {"boq": boq.empty(), "boq_ver": 0, "details": {}, "rates": rat
                    "projects": {}, "p_name": "New Project", "p_client": "", "p_location": "", "p_by": "",
                    project.CURRENCY_KEY: "USD", "p_standard": STANDARDS[0], "files": {}, "nav": NAV[0],
                    "account": {}, "opts": {"canvas_height": 760, "decimals": 3, "snap": True, "offsets": True,
-                                            "currency": "USD", "standard": STANDARDS[0]}}.items():
+                                            "currency": "USD", "standard": STANDARDS[0], "company": ""},
+                   "admin": admin.defaults(), "admin_ver": 0, "hidden_layers": {}, "layer_ver": 0, "models": {},
+                   "mt_show": "Both", "dim_hl_item": None, "mt_deduct": False, "mt_level": "",
+                   "ribbon_min": False, "ui_max": False}.items():
     ss.setdefault(key, value)
 ss["mt"] = measure.upgrade(ss["mt"])
+ss["admin"] = admin.upgrade(ss["admin"])
+ss.opts.setdefault("company", "")
 if "nav_pending" in ss:  # set by dialogs, applied before the view selector is drawn
     ss.nav = ss.pop("nav_pending")
+if ss.nav not in NAV:  # views renamed in an update
+    ss.nav = NAV[2] if "Dimension" in str(ss.nav) else NAV[0]
 
 # A project switch is requested by a button, then applied here, before any project widget is drawn.
 if "pending_project" in ss:
@@ -138,6 +166,13 @@ def go_to(view: str):
     ss.nav = view
 
 
+def toggle_ui(flag: str):
+    """Title-bar buttons: minimise the ribbon / maximise the drawing."""
+    ss[flag] = not ss[flag]
+    if flag == "ui_max" and ss.ui_max and ss.nav not in (NAV[0], NAV[2]):
+        ss.nav = NAV[0]
+
+
 # ------------------------------------------------------------------ cached readers
 
 @st.cache_data(show_spinner="Reading DXF drawing…", max_entries=8)
@@ -161,11 +196,11 @@ def cached_pdf_image(data: bytes, page: int, crop: tuple, highlight: tuple = ())
 
 
 @st.cache_data(show_spinner="Preparing drawing for measuring…", max_entries=8)
-def cached_measure_image(data: bytes, name: str, page: int, dpi: int) -> tuple[str, float, list[float], float | None]:
+def cached_measure_image(data: bytes, name: str, page: int, dpi: int, hidden: tuple = ()) -> tuple[str, float, list[float], float | None]:
     """(JPEG data URL, display pixels per drawing unit, flat snap-point list in display pixels,
-    known metres per drawing unit or None when the user has to set the scale)."""
+    known metres per drawing unit or None when the user has to set the scale). hidden: DXF layers switched off."""
     if name.lower().endswith(".dxf"):
-        image, m_per_px, snap = dxf_takeoff.render_image(dxf_takeoff.takeoff(data, None, True))
+        image, m_per_px, snap = dxf_takeoff.render_image(dxf_takeoff.takeoff(data, None, True), hidden_layers=hidden)
         return measure.image_data_url(image), 1.0, snap, m_per_px
     if name.lower().endswith(".pdf"):
         image, k = pdf_takeoff.render_for_measure(data, page, dpi)
@@ -296,8 +331,8 @@ def dxf_figure(result: dxf_takeoff.DxfResult) -> go.Figure:
 
 
 def project_details() -> dict:
-    return {k: v for k, v in {"Project": ss.p_name, "Client": ss.p_client, "Location": ss.p_location, "Prepared by": ss.p_by,
-                              "Measurement standard": ss.p_standard}.items() if v}
+    return {k: v for k, v in {"Company": ss.opts.get("company", ""), "Project": ss.p_name, "Client": ss.p_client,
+                              "Location": ss.p_location, "Prepared by": ss.p_by, "Measurement standard": ss.p_standard}.items() if v}
 
 
 def full_export(lines: pd.DataFrame) -> bytes:
@@ -484,7 +519,7 @@ def new_item_dialog() -> None:
 @st.dialog("➕ Add building")
 def building_dialog() -> None:
     name = st.text_input("Building name", placeholder="e.g. Villa Type A, Block B, Car park")
-    st.caption("Levels are copied from the first building; edit them in 🗂️ Dimension Group View.")
+    st.caption("Levels are copied from the first building; edit them in Workbooks → 🧾 Properties → Buildings & levels.")
     if st.button("Add building", type="primary"):
         ss.pending_building = measure.add_building(ss.mt, name)["id"]
         ss.mt_ver += 1
@@ -764,10 +799,39 @@ def dlg_project_property() -> None:
     with t_param:
         globals_form()
     with t_build:
-        st.dataframe(pd.DataFrame([{"Code": b["code"], "Building": b["name"], **{asm.LEVEL_LABELS[k]: b["levels"].get(k) for k in asm.LEVELS}}
-                                   for b in ss.mt["buildings"]]), hide_index=True)
-        if st.button("Edit in 🗂️ Dimension Group View"):
-            ss.nav_pending = NAV[2]
+        buildings_levels_editor()
+
+
+def buildings_levels_editor() -> None:
+    """Edit building names and levels (NGL, start, water table, BGB, FFL, soffit); Save applies them."""
+    mt = ss.mt
+    sheet = measure.qto_sheet(mt)
+    st.caption("Heights and depths are calculated from these levels. Blank start level = NGL; blank BGB = start level.")
+    counts = {b["name"]: int((sheet["Building"] == b["name"]).sum()) for b in mt["buildings"]}
+    rows = [{"Code": b["code"], "Building": b["name"], "Measurements": counts[b["name"]], **{k: b["levels"].get(k) for k in asm.LEVELS}}
+            for b in mt["buildings"]]
+    level_cfg = {k: st.column_config.NumberColumn(asm.LEVEL_LABELS[k], format="%.3f", step=0.05) for k in asm.LEVELS}
+    frame = pd.DataFrame(rows).astype({k: float for k in asm.LEVELS})  # blank levels become NaN, not text
+    edited = st.data_editor(frame, key=f"bl_editor_{ss.mt_ver}", hide_index=True, disabled=["Code", "Measurements"],
+                            column_config={"Building": st.column_config.TextColumn(width="medium", required=True), **level_cfg})
+    a, b = st.columns([1, 2])
+    if a.button("💾 Save buildings & levels", type="primary", key="bl_save"):
+        for bld, (_, r) in zip(mt["buildings"], edited.iterrows()):
+            name = str(r["Building"] or "").strip()
+            if name:
+                bld["name"] = name
+            for key in asm.LEVELS:
+                value = None if pd.isna(r[key]) else float(r[key])
+                bld["levels"][key] = asm.LEVELS[key] if key in ("NGL", "FFL", "soffit") and value is None else value
+        ss.mt_ver += 1
+        st.rerun()
+    empty = [bld for bld in mt["buildings"] if counts[bld["name"]] == 0]
+    if len(mt["buildings"]) > 1 and empty:
+        gone = b.selectbox("Remove an empty building", ["—", *[bld["id"] for bld in empty]], key="bl_rm",
+                           format_func=lambda i: i if i == "—" else measure.building_by_id(mt, i)["name"])
+        if gone != "—" and b.button("🗑️ Remove", key="bl_rm_go"):
+            measure.delete_building(mt, gone)
+            ss.mt_ver += 1
             st.rerun()
 
 
@@ -901,26 +965,522 @@ def globals_form() -> None:
             st.rerun()
 
 
-def ribbon_home(issue_count: int) -> None:
+# ---- Home ribbon: callbacks (run before widgets are drawn) and dialogs.
+
+@st.cache_data(show_spinner=False, max_entries=8)
+def cached_layers(data: bytes) -> list[str]:
+    return dxf_takeoff.layer_names(cached_dxf(data, None, True))
+
+
+def is_dxf(name: str | None) -> bool:
+    return bool(name) and name.lower().endswith(".dxf")
+
+
+QUICK_TOOLS = [  # (icon, canvas command, tooltip with the keyboard shortcut, which is instant)
+    ("🖐", "pan", "Pan — drag the drawing (P). Right/middle drag or Space+drag always pans."),
+    ("🔍", "window", "Zoom window — drag a box (W)"),
+    ("➕", "zoom_in", "Zoom in (+ or mouse wheel)"),
+    ("➖", "zoom_out", "Zoom out (− or mouse wheel)"),
+    ("⛶", "extents", "Zoom extents — fit the drawn content (E)"),
+    ("⤢", "all", "Zoom all — the whole sheet (A)"),
+    ("↻", "rotate", "Rotate view 90°"),
+    ("↶", "undo", "Undo last point (Backspace)"),
+    ("✔", "finish", "Finish the measurement (Enter or double-click)"),
+    ("✕", "cancel", "Cancel the measurement / tool (Esc)"),
+]
+
+
+def view_cmd(name: str):
+    """Send a view or measuring command to the drawing (see QUICK_TOOLS) and make sure it is on screen."""
+    ss.canvas_cmd = {"name": name, "nonce": uuid.uuid4().hex}
+    if ss.nav not in (NAV[0], NAV[2]):
+        ss.nav = NAV[0]
+
+
+def layers_cmd(action: str):
+    doc, _ = current_drawing()
+    if not is_dxf(doc):
+        ss.project_msg = "Layers can be switched on DXF drawings; PDFs and scans are flat images."
+        return
+    hidden = set(ss.hidden_layers.get(doc, []))
+    ss.hidden_layers[doc] = [] if action == "all" else [l for l in cached_layers(ss.files[doc]) if l not in hidden]
+    ss.layer_ver += 1
+
+
+def sign_cmd(sign: str):
+    ss.mt_deduct = sign == "-"
+
+
+def show_both_cmd():
+    ss.mt_show = "Current sign" if ss.mt_show == "Both" else "Both"
+
+
+def recalc_cmd():
+    ss.boq = boq.finalise(ss.boq, sort=False)
+    ss.boq_ver += 1
+    ss.mt_ver += 1
+    cached_selftest.clear()
+    ss.project_msg = "Recalculated: BOQ amounts, derived items and self-test refreshed"
+
+
+def open_doc(name: str):
+    ss.mt_doc = name
+
+
+def refresh_params() -> int:
+    """Re-evaluate item parameters written as formulas after Standard Variables change."""
+    variables = admin.variables(ss.admin)
+    changed = 0
+    for item in ss.mt["items"]:
+        for key, text in item.get("param_exprs", {}).items():
+            try:
+                value = admin.evaluate(text, variables)
+            except ValueError:
+                continue
+            if item.setdefault("params", {}).get(key) != value:
+                item["params"][key], changed = value, changed + 1
+    ss.mt_ver += 1
+    return changed
+
+
+def layers_editor(doc: str, key: str) -> list[str] | None:
+    """Show/hide table for a DXF drawing's layers; returns the new hidden list when it changed."""
+    layers = cached_layers(ss.files[doc])
+    hidden = set(ss.hidden_layers.get(doc, []))
+    table = pd.DataFrame({"Show": [l not in hidden for l in layers], "Layer": layers})
+    edited = st.data_editor(table, key=f"{key}_{doc}_{ss.layer_ver}", hide_index=True, disabled=["Layer"], height=280,
+                            column_config={"Show": st.column_config.CheckboxColumn(width="small")})
+    new_hidden = sorted(l for l, show in zip(edited["Layer"], edited["Show"]) if not show)
+    return new_hidden if new_hidden != sorted(hidden) else None
+
+
+def plain_image(data: bytes, name: str, page: int):
+    if is_dxf(name):
+        return dxf_takeoff.render_image(dxf_takeoff.takeoff(data, None, True), max_side=2000)[0]
+    if name.lower().endswith(".pdf"):
+        return pdf_takeoff.render_for_measure(data, page, 80)[0]
+    return ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
+
+
+@st.cache_data(show_spinner="Comparing drawings…", max_entries=4)
+def cached_compare(data_a: bytes, name_a: str, page_a: int, data_b: bytes, name_b: str, page_b: int):
+    a_img = plain_image(data_a, name_a, page_a).convert("L")
+    b_img = plain_image(data_b, name_b, page_b).convert("L").resize(a_img.size)
+    a, b = np.asarray(a_img) < 160, np.asarray(b_img) < 160
+    out = np.full((a_img.size[1], a_img.size[0], 3), 255, np.uint8)
+    out[a & b] = (60, 60, 60)
+    out[a & ~b] = (220, 38, 38)
+    out[~a & b] = (37, 99, 235)
+    changed = float((a ^ b).sum()) / max(float((a | b).sum()), 1.0)
+    return Image.fromarray(out), changed
+
+
+@st.cache_data(show_spinner="Finding blocks and marks…", max_entries=8)
+def auto_count_objects(data: bytes, name: str, page: int) -> list[dict]:
+    """Countable objects: DXF block references, or marks such as D1 / W2 written on a PDF."""
+    if is_dxf(name):
+        return [o for o in cached_objects(data, name, page) if o["kind"] == "insert"]
+    if name.lower().endswith(".pdf"):
+        return pdf_takeoff.mark_objects(data, page)
+    return []
+
+
+def create_auto_counts(keys: list[str], doc: str, page: int, objects: list[dict]) -> int:
+    """One Count dimension group per block / mark, with a point on every occurrence."""
+    mt, made = ss.mt, 0
+    for key in keys:
+        tag = f"{doc}|{page}|{key}"
+        if any(i.get("auto_key") == tag for i in mt["items"]):
+            continue
+        points = [[round(o["center"][0], 3), round(o["center"][1], 3)] for o in objects if o["key"] == key]
+        if not points:
+            continue
+        kind, label = key.split(":", 1)
+        discipline, section = dz.classify(label)
+        item = measure.add_item(mt, f"{label} ({'block' if kind == 'block' else 'mark'})", discipline, section, "Count")
+        item["auto_key"] = tag
+        measure.add_shape(mt, item["id"], doc, page, points, building=ss.get("mt_building", 1), level=ss.get("mt_level", ""))
+        made += 1
+    ss.mt_ver += 1
+    return made
+
+
+def auto_count_table(objects: list[dict]) -> pd.DataFrame:
+    counts: dict[str, int] = {}
+    for o in objects:
+        counts[o["key"]] = counts.get(o["key"], 0) + 1
+    return pd.DataFrame([{"Object": k.split(":", 1)[1], "Type": k.split(":", 1)[0], "Count": n, "Key": k}
+                         for k, n in sorted(counts.items())], columns=["Object", "Type", "Count", "Key"])
+
+
+@st.dialog("🗺️ Drawing")
+def dlg_drawing_pick() -> None:
+    names = measurable_files()
+    if not names:
+        st.info("No drawings yet — 📥 Import or Drawings tab → 📂 Drawings.")
+        return
+    for name in names:
+        n = sum(1 for s in ss.mt["shapes"] if s["doc"] == name)
+        if st.button(f"{name} · {n} measurements", key=f"pick_{name}", use_container_width=True):
+            ss.pending_doc, ss.nav_pending = name, NAV[0]
+            st.rerun()
+
+
+@st.dialog("🔍 Compare drawings", width="large")
+def dlg_compare() -> None:
+    names = measurable_files()
+    if len(names) < 2:
+        st.info("Import two drawings (e.g. revision A and revision B) to compare them.")
+        return
+    a, b = st.columns(2)
+    name_a = a.selectbox("Drawing A (earlier)", names, key="cmp_a")
+    name_b = b.selectbox("Drawing B (later)", names, index=1, key="cmp_b")
+    page_a = a.number_input("Page", 1, cached_pdf_pages(ss.files[name_a]) if name_a.lower().endswith(".pdf") else 1, 1, key="cmp_pa") - 1
+    page_b = b.number_input("Page ", 1, cached_pdf_pages(ss.files[name_b]) if name_b.lower().endswith(".pdf") else 1, 1, key="cmp_pb") - 1
+    if st.button("Compare", type="primary"):
+        image, changed = cached_compare(ss.files[name_a], name_a, int(page_a), ss.files[name_b], name_b, int(page_b))
+        st.image(image, caption=f"Red = only in A (removed) · Blue = only in B (added) · Grey = unchanged · {changed * 100:.1f}% of linework differs")
+
+
+@st.dialog("📑 File layers", width="large")
+def dlg_layers() -> None:
+    doc, _ = current_drawing()
+    if not is_dxf(doc):
+        st.info("Layers can be switched on DXF drawings. PDFs and scans are flat images (use 2D Auto Take-off for PDF pens).")
+        return
+    st.caption(f"{doc} — untick a layer to hide it. Measurements stay; snapping follows the visible layers.")
+    new_hidden = layers_editor(doc, "dlg_layers")
+    if st.button("Apply", type="primary"):
+        if new_hidden is not None:
+            ss.hidden_layers[doc] = new_hidden
+            ss.layer_ver += 1
+        st.rerun()
+
+
+@st.dialog("📤 Export dimensions", width="large")
+def dlg_export_dims() -> None:
+    stem = project.file_name(project.snapshot(ss))[:-9]
+    derived, _ = measure.derived_items(ss.mt)
+    for label, help_text, make, name, mime, empty in [
+        ("🗂️ Dimension groups (CSV)", "Each group with its total per building", lambda: measure.group_totals(ss.mt).to_csv(index=False).encode("utf-8-sig"),
+         f"{stem}_dimension_groups.csv", "text/csv", not ss.mt["items"]),
+        ("📋 Dimension sheet (CSV)", "Every measurement", lambda: measure.qto_sheet(ss.mt).drop(columns="Shape").to_csv(index=False).encode("utf-8-sig"),
+         f"{stem}_dimension_sheet.csv", "text/csv", not ss.mt["shapes"]),
+        ("⚙️ Derived items (CSV)", "Assembly items with formula trace", lambda: derived.to_csv(index=False).encode("utf-8-sig"),
+         f"{stem}_derived_items.csv", "text/csv", derived.empty),
+        ("📐 Take-off file", "Items, measurements, buildings and scales", lambda: measure.to_json(ss.mt), f"{stem}.takeoff.json",
+         "application/json", not ss.mt["items"]),
+    ]:
+        a, b = st.columns([1.3, 2])
+        a.download_button(label, b"" if empty else make(), file_name=name, mime=mime, disabled=empty, use_container_width=True, key=f"xd_{name}")
+        b.caption(help_text + (" — nothing yet" if empty else ""))
+
+
+@st.dialog("✍️ Add manual dimension")
+def dlg_manual() -> None:
     mt = ss.mt
-    c = st.columns([2.2, 1, 1.2, 1, 1, 1, 1.2])
-    if c[1].button("➕ Building", use_container_width=True):
-        building_dialog()
-    if "pending_building" in ss:
-        ss.mt_building = ss.pop("pending_building")
-    ids = [b["id"] for b in mt["buildings"]]
-    if ss.get("mt_building") not in ids:
-        ss.mt_building = ids[0]
-    names = {b["id"]: f"🏢 {b['name']}" for b in mt["buildings"]}
-    c[0].selectbox("Building", ids, format_func=names.get, key="mt_building", label_visibility="collapsed",
-                   help="New measurements are booked to this building")
-    c[2].text_input("Level", key="mt_level", placeholder="Level, e.g. GF", label_visibility="collapsed",
-                    help="Floor or level for new measurements, e.g. GF, L1, Roof")
-    c[3].button("🖼️ Drawing", use_container_width=True, on_click=go_to, args=(NAV[0],))
-    c[4].button("📒 Workbook", use_container_width=True, on_click=go_to, args=(NAV[1],))
-    c[5].button("🗂️ Groups", use_container_width=True, on_click=go_to, args=(NAV[2],))
-    c[6].button(f"✅ Check ({issue_count})" if issue_count else "✅ Check: OK", use_container_width=True,
-                type="primary" if issue_count else "secondary", on_click=go_to, args=(NAV[3],))
+    if not mt["items"]:
+        st.info("Create a dimension group first (Measure → ➕ Add).")
+        return
+    ids = [i["id"] for i in mt["items"]]
+    default = ids.index(ss.mt_active) if ss.get("mt_active") in ids else 0
+    item = measure.item_by_id(mt, st.selectbox("Dimension group", ids, index=default, format_func=lambda i: item_label(measure.item_by_id(mt, i))))
+    unit = measure.item_unit(item["type"], 0, 0)
+    with st.form("manual_dim"):
+        value = st.number_input(f"Measured quantity ({unit})", 0.0, 1e9, 0.0, step=1.0, format="%.3f",
+                                help="Typed instead of measured on a drawing — e.g. a length taken from a section")
+        a, b = st.columns(2)
+        timesing = a.number_input("Timesing ×", 0.01, 1000.0, 1.0, step=1.0)
+        deduct = b.checkbox("Deduction (−ve)", bool(ss.get("mt_deduct")))
+        location = st.text_input("Location / note", ss.get("mt_loc", ""))
+        if st.form_submit_button("Add", type="primary") and value > 0:
+            measure.add_manual(mt, item["id"], value, building=ss.get("mt_building", 1), level=ss.get("mt_level", ""),
+                               location=location, timesing=timesing, deduct=deduct)
+            ss.mt_ver += 1
+            ss.project_msg = f"Manual dimension {value:g} {unit} added to {item['ref']}"
+            st.rerun()
+
+
+@st.dialog("✅ Accept All — auto count", width="large")
+def dlg_accept_all() -> None:
+    doc, page = current_drawing()
+    objects = auto_count_objects(ss.files[doc], doc, page) if doc else []
+    if not objects:
+        st.info("Nothing to auto count on this drawing. DXF: block references (doors, lights…). PDF: marks such as D1, W2, C12.")
+        return
+    table = auto_count_table(objects)
+    st.caption(f"{doc}: {len(table)} kinds of object found. Accept creates one Count dimension group for each.")
+    st.dataframe(table.drop(columns="Key"), hide_index=True, height=260)
+    if st.button(f"✅ Accept all {len(table)}", type="primary"):
+        made = create_auto_counts(list(table["Key"]), doc, page, objects)
+        ss.project_msg = f"Auto count: {made} dimension groups created"
+        st.rerun()
+
+
+@st.dialog("➕ Add workbook line", width="large")
+def dlg_boq_add() -> None:
+    codes = admin.frame(ss.admin, "Code Library").dropna(subset=["Code"])
+    pick = st.selectbox("From code library", ["—", *codes["Code"].astype(str)],
+                        format_func=lambda c: c if c == "—" else f"{c} · {codes.loc[codes['Code'].astype(str) == c, 'Description'].iloc[0]}")
+    row = codes[codes["Code"].astype(str) == pick].iloc[0] if pick != "—" else None
+    units = admin.units(ss.admin)
+    with st.form("boq_add"):
+        a, b = st.columns(2)
+        ref = a.text_input("Ref / code", "" if row is None else str(row["Code"]))
+        discipline = b.selectbox("Discipline", dz.DISCIPLINES)
+        section_default = str(row["Work Section"]) if row is not None and row["Work Section"] in dz.NRM2_SECTIONS else dz.UNCLASSIFIED
+        section = st.selectbox("Work section", dz.NRM2_SECTIONS, index=dz.NRM2_SECTIONS.index(section_default))
+        desc = st.text_input("Description", "" if row is None else str(row["Description"]))
+        c1, c2, c3 = st.columns(3)
+        unit_default = str(row["Unit"]) if row is not None and row["Unit"] in units else "nr"
+        unit = c1.selectbox("Unit", units, index=units.index(unit_default))
+        qty = c2.number_input("Quantity", 0.0, 1e12, 0.0, format="%.3f")
+        rate = c3.number_input(f"Rate ({ss[project.CURRENCY_KEY]})", 0.0, 1e12, 0.0, format="%.2f")
+        if st.form_submit_button("Add line", type="primary") and desc.strip():
+            line = pd.DataFrame([{"Ref": ref, "Discipline": discipline, "Work Section": section, "Description": desc.strip(),
+                                  "Unit": unit, "Quantity": qty, "Rate": rate, "Source": "Manual entry"}])
+            ss.boq = boq.finalise(pd.concat([ss.boq, line], ignore_index=True), sort=False)
+            ss.boq_ver += 1
+            ss.project_msg = f"Added “{desc.strip()}” to the BOQ"
+            st.rerun()
+
+
+@st.dialog("🔤 Spelling", width="large")
+def dlg_spelling() -> None:
+    descriptions = list(ss.boq["Description"]) + [i["description"] for i in ss.mt["items"]]
+    fixes = admin.spelling(descriptions, extra_words=" ".join(ss.rates["Description"].astype(str)).split())
+    if fixes.empty:
+        st.success("No spelling problems found in BOQ and dimension group descriptions.")
+        return
+    st.caption("Words that look misspelt, with the closest construction term. Edit a suggestion or untick to skip.")
+    edited = st.data_editor(fixes, hide_index=True, disabled=["Word"], key="spell_editor")
+    if st.button("Apply corrections", type="primary"):
+        ss.boq = admin.apply_spelling(ss.boq, edited)
+        items = admin.apply_spelling(pd.DataFrame({"Description": [i["description"] for i in ss.mt["items"]]}), edited)
+        for item, desc in zip(ss.mt["items"], items["Description"]):
+            item["description"] = desc
+        ss.boq_ver += 1
+        ss.mt_ver += 1
+        ss.project_msg = f"{int(edited['Apply'].sum())} spelling corrections applied"
+        st.rerun()
+
+
+@st.dialog("ƒ Function", width="large")
+def dlg_function() -> None:
+    if ss.boq.empty:
+        st.info("The BOQ is empty — send the take-off to the BOQ first.")
+    t_loc, t_mark, t_round, t_sub, t_custom = st.tabs(["Location factor", "Markup %", "Round quantities", "Subcontractor rates", "Custom quantities"])
+    scope = ["All disciplines", *dz.DISCIPLINES]
+    with t_loc:
+        locs = admin.frame(ss.admin, "Location Constants").dropna(subset=["Factor"])
+        if locs.empty:
+            st.caption("No location constants — add them in 🛡️ Administration.")
+        else:
+            loc = st.selectbox("Location", list(locs["Location"].astype(str)))
+            factor = float(locs.loc[locs["Location"].astype(str) == loc, "Factor"].iloc[0])
+            disc = st.selectbox("Apply to", scope, key="fn_loc_scope")
+            if st.button(f"Multiply rates by {factor:g}", type="primary", disabled=ss.boq.empty):
+                ss.boq = admin.apply_factor(ss.boq, factor, None if disc == scope[0] else disc)
+                ss.boq_ver += 1
+                st.rerun()
+    with t_mark:
+        pct = st.number_input("Markup / adjustment %", -90.0, 500.0, 10.0, step=1.0)
+        disc = st.selectbox("Apply to", scope, key="fn_mark_scope")
+        if st.button(f"Apply {pct:+g}% to rates", type="primary", disabled=ss.boq.empty):
+            ss.boq = admin.apply_markup(ss.boq, pct, None if disc == scope[0] else disc)
+            ss.boq_ver += 1
+            st.rerun()
+    with t_round:
+        dec = st.radio("Decimals", [0, 1, 2], index=2, horizontal=True)
+        up = st.checkbox("Round up (never under-measure)", True)
+        if st.button("Round BOQ quantities", type="primary", disabled=ss.boq.empty):
+            ss.boq = admin.round_quantities(ss.boq, dec, up)
+            ss.boq_ver += 1
+            st.rerun()
+    with t_sub:
+        subs = admin.frame(ss.admin, "Subcontractor Values")
+        st.caption(f"{int((subs['Rate'] > 0).sum())} priced subcontractor quotes. Lines match on work section and unit.")
+        overwrite = st.checkbox("Replace rates already entered", False)
+        if st.button("Apply subcontractor rates", type="primary", disabled=ss.boq.empty):
+            ss.boq, n = admin.apply_subcontractors(ss.boq, subs, overwrite)
+            ss.boq_ver += 1
+            ss.project_msg = f"{n} lines priced from subcontractor values"
+            st.rerun()
+    with t_custom:
+        custom = admin.frame(ss.admin, "Custom Quantities")
+        st.dataframe(custom, hide_index=True)
+        if st.button("Add custom quantities to the BOQ", type="primary", disabled=custom.empty):
+            lines = admin.custom_to_boq(custom)
+            ss.boq = boq.finalise(pd.concat([ss.boq[ss.boq["Source"] != "Custom quantities"], lines], ignore_index=True))
+            ss.boq_ver += 1
+            st.rerun()
+
+
+@st.dialog("🎨 Format", width="large")
+def dlg_format() -> None:
+    t_num, t_text, t_head = st.tabs(["Numbers", "Text case", "Report header"])
+    with t_num:
+        dec = st.radio("Quantity decimals on screen", [2, 3], index=[2, 3].index(ss.opts["decimals"]), horizontal=True)
+        if st.button("Apply", type="primary", key="fmt_num"):
+            ss.opts["decimals"] = dec
+            st.rerun()
+    with t_text:
+        style = st.radio("Descriptions", ["Sentence case", "Title Case", "UPPER CASE"], horizontal=True)
+        items_too = st.checkbox("Also dimension group names", True)
+        if st.button("Apply to BOQ descriptions", type="primary", key="fmt_case"):
+            ss.boq = admin.change_case(ss.boq, style)
+            if items_too:
+                names = admin.change_case(pd.DataFrame({"Description": [i["description"] for i in ss.mt["items"]]}), style)
+                for item, desc in zip(ss.mt["items"], names["Description"]):
+                    item["description"] = desc
+            ss.boq_ver += 1
+            ss.mt_ver += 1
+            st.rerun()
+    with t_head:
+        company = st.text_input("Company name on reports", ss.opts.get("company", ""))
+        st.caption("Shown on the Summary sheet of every Excel export, above the project details.")
+        if st.button("Save", type="primary", key="fmt_head"):
+            ss.opts["company"] = company.strip()
+            st.rerun()
+
+
+ADMIN_SELECTS = {
+    "Discipline": dz.DISCIPLINES, "Work Section": dz.NRM2_SECTIONS, "Template": list(asm.TEMPLATES),
+}
+
+
+@st.dialog("🛡️ Administration", width="large")
+def dlg_administration() -> None:
+    names = ["Projects", "Location Constants", "Custom Quantities", "Standard Dimensions", "Code Library", "Rate Library",
+             "Standard Zones", "Standard Variables", "Unit of Measurement", "Subcontractor Values"]
+    tabs = st.tabs(names)
+    with tabs[0]:
+        rows = [{"Project": ss.p_name, "Status": "open", "Items": len(ss.mt["items"]), "BOQ lines": len(ss.boq)}]
+        rows += [{"Project": n, "Status": "in session", "Items": len((d.get("takeoff") or {}).get("items", [])),
+                  "BOQ lines": len(d.get("boq") or [])} for n, d in ss.projects.items() if n != ss.p_name]
+        st.dataframe(pd.DataFrame(rows), hide_index=True)
+        others = [n for n in ss.projects if n != ss.p_name]
+        if others:
+            pick = st.selectbox("Project", others, key="adm_proj")
+            a, b = st.columns(2)
+            if a.button("📂 Open", key="adm_open"):
+                ss.pending_project = ss.projects[pick]
+                st.rerun()
+            if b.button("🗑️ Delete from session", key="adm_del"):
+                ss.projects.pop(pick, None)
+                st.rerun()
+    for name, tab in zip(names[1:], tabs[1:]):
+        with tab:
+            if name == "Rate Library":
+                st.caption(f"{len(ss.rates)} rates in the library. Upload, edit and download them on the Rate Library page; "
+                           "Workbook rates are looked up from it.")
+                st.dataframe(ss.rates.head(200), hide_index=True, height=240)
+                if st.button("💰 Open Rate Library", key="adm_rates"):
+                    ss.nav_pending = NAV[7]
+                    st.rerun()
+                continue
+            st.caption(admin.TABLES[name]["help"])
+            frame = admin.frame(ss.admin, name)
+            config = {c: st.column_config.SelectboxColumn(options=opts) for c, opts in ADMIN_SELECTS.items() if c in frame.columns}
+            if "Unit" in frame.columns and name != "Unit of Measurement":
+                config["Unit"] = st.column_config.SelectboxColumn(options=admin.units(ss.admin))
+            edited = st.data_editor(frame, key=f"adm_{name}_{ss.admin_ver}", num_rows="dynamic", hide_index=True, column_config=config)
+            a, b = st.columns([1, 2])
+            if a.button("💾 Save", key=f"adm_save_{name}", type="primary"):
+                ss.admin[name] = admin.records(edited)
+                ss.admin_ver += 1
+                note = f" · {refresh_params()} parameters recalculated" if name == "Standard Variables" else ""
+                ss.project_msg = f"{name} saved{note}"
+                st.rerun()
+            if name == "Standard Dimensions" and not edited.empty:
+                pick = b.selectbox("Create a dimension group from", list(edited["Name"].astype(str)), key="adm_std_pick")
+                if b.button("➕ Create dimension group", key="adm_std_go"):
+                    row = edited[edited["Name"].astype(str) == pick].iloc[0]
+                    template = row["Template"] if row["Template"] in asm.TEMPLATES else "isolated_footing"
+                    item = measure.add_assembly_item(ss.mt, template, pick, "Structural",
+                                                     asm.S_MAS if template == "blockwork_wall" else asm.S_CON)
+                    for dim in ("L", "W", "D"):
+                        if dim in item["params"] and pd.notna(row[dim]) and row[dim] > 0:
+                            item["params"][dim] = float(row[dim])
+                    ss.pending_active, ss.nav_pending = item["id"], NAV[0]
+                    ss.mt_ver += 1
+                    st.rerun()
+
+
+def ribbon_home(issue_count: int) -> None:
+    """Six groups like a desktop take-off package: Drawing · View · Format · Administration / Measure · Workbooks."""
+    row1 = st.columns([2.6, 10, 1.1, 1.5, 1.3])
+    with row1[0].container(border=True):
+        st.caption("DRAWING")
+        c = st.columns(3)
+        if c[0].button("🗺️ Drawing", key="h_draw", use_container_width=True, help="Open a drawing"):
+            dlg_drawing_pick()
+        if c[1].button("ℹ️ Property", key="h_dprop", use_container_width=True, help="Drawing properties, rename, remove"):
+            dlg_property()
+        if c[2].button("🔍 Compare", key="h_cmp", use_container_width=True, help="Overlay two drawings or revisions"):
+            dlg_compare()
+    with row1[1].container(border=True):
+        st.caption("VIEW")
+        c = st.columns(11)
+        c[0].button("👁️ All Layers", key="h_all", use_container_width=True, on_click=layers_cmd, args=("all",))
+        c[1].button("🔄 Invert Layers", key="h_inv", use_container_width=True, on_click=layers_cmd, args=("invert",))
+        if c[2].button("📑 File Layers", key="h_lay", use_container_width=True):
+            dlg_layers()
+        for col, (label, name, tip) in zip(c[3:], [
+            ("🖐 Pan", "pan", "Drag the drawing (P); click again or Esc to stop"), ("➕ Zoom In", "zoom_in", "+ or mouse wheel"),
+            ("➖ Zoom Out", "zoom_out", "− or mouse wheel"), ("🔍 Zoom Area", "window", "Then drag a box on the drawing (W)"),
+            ("⛶ Zoom Extent", "extents", "Fit the drawn content (E)"), ("⤢ Zoom All", "all", "The whole sheet (A)"),
+            ("↻ Rotate 90", "rotate", "Turn the view; measurements stay correct"), ("🎯 Reset View", "reset", "Unrotate and fit the sheet"),
+        ]):
+            col.button(label, key=f"h_v_{name}", use_container_width=True, on_click=view_cmd, args=(name,), help=tip)
+    with row1[2].container(border=True):
+        st.caption("FORMAT")
+        if st.button("🎨 Format", key="h_fmt", use_container_width=True):
+            dlg_format()
+    with row1[3].container(border=True):
+        st.caption("ADMINISTRATION")
+        if st.button("🛡️ Administration", key="h_admin", use_container_width=True):
+            dlg_administration()
+    with row1[4].container(border=True):
+        st.caption("CHECK")
+        st.button(f"✅ {issue_count} errors" if issue_count else "✅ OK", key="h_check", use_container_width=True,
+                  type="primary" if issue_count else "secondary", on_click=go_to, args=(NAV[3],))
+    row2 = st.columns([9, 6])
+    with row2[0].container(border=True):
+        st.caption("MEASURE")
+        c = st.columns(9)
+        if c[0].button("➕ Add", key="h_m_add", use_container_width=True, help="New dimension group"):
+            new_item_dialog()
+        if c[1].button("⚙️ Property", key="h_m_prop", use_container_width=True, disabled=not ss.get("mt_active")):
+            item_dialog(ss.mt_active)
+        if c[2].button("📤 Export", key="h_m_exp", use_container_width=True):
+            dlg_export_dims()
+        neg = bool(ss.get("mt_deduct"))
+        c[3].button("➕ +ve", key="h_pos", use_container_width=True, type="secondary" if neg else "primary", on_click=sign_cmd, args=("+",),
+                    help="New measurements add to the quantity")
+        c[4].button("➖ −ve", key="h_neg", use_container_width=True, type="primary" if neg else "secondary", on_click=sign_cmd, args=("-",),
+                    help="New measurements are deductions")
+        c[5].button("± Both", key="h_both", use_container_width=True, type="primary" if ss.mt_show == "Both" else "secondary",
+                    on_click=show_both_cmd, help="Show +ve and −ve measurements (off: only the current sign)")
+        c[6].button("📏 Line", key="h_line", use_container_width=True, on_click=set_tool, args=(T_LEN,), help="Dimension line to check a length")
+        if c[7].button("✍️ Add manual", key="h_manual", use_container_width=True):
+            dlg_manual()
+        if c[8].button("✅ Accept All", key="h_accept", use_container_width=True, help="Auto count every block / mark on this drawing"):
+            dlg_accept_all()
+    with row2[1].container(border=True):
+        st.caption("WORKBOOKS")
+        c = st.columns(6)
+        if c[0].button("➕ Add", key="h_w_add", use_container_width=True, help="Add a BOQ line (from the code library)"):
+            dlg_boq_add()
+        if c[1].button("🧾 Properties", key="h_w_prop", use_container_width=True):
+            dlg_project_property()
+        if c[2].button("📊 Reports", key="h_w_rep", use_container_width=True):
+            dlg_export()
+        if c[3].button("🔤 Spelling", key="h_w_spell", use_container_width=True):
+            dlg_spelling()
+        c[4].button("🔁 Recalc", key="h_w_recalc", use_container_width=True, on_click=recalc_cmd)
+        if c[5].button("ƒ Function", key="h_w_fn", use_container_width=True):
+            dlg_function()
 
 
 def ribbon_drawings() -> None:
@@ -987,8 +1547,29 @@ def ribbon_dimension() -> None:
     mt = ss.mt
     if "pending_tool" in ss:  # set by the File → Import dialog
         ss.mt_tool = ss.pop("pending_tool")
-    st.radio("Tool", TOOLS, key="mt_tool", horizontal=True, label_visibility="collapsed",
-             help="Measure the active item · Select similar objects · Check a length or area without billing it · Select/pan · Calibrate")
+    t = st.columns([8, 1, 1, 1], vertical_alignment="center")
+    t[0].radio("Tool", TOOLS, key="mt_tool", horizontal=True, label_visibility="collapsed",
+               help="Measure the active item · Select similar objects · Check a length or area without billing it · Select/pan · Calibrate")
+    for col, (label, name, tip) in zip(t[1:], [("↶ Undo", "undo", "Remove the last point (Backspace)"),
+                                              ("✔ Finish", "finish", "Finish the measurement (Enter / double-click)"),
+                                              ("✕ Cancel", "cancel", "Cancel the measurement in progress (Esc)")]):
+        col.button(label, key=f"d_{name}", use_container_width=True, on_click=view_cmd, args=(name,), help=tip)
+    b = st.columns([2.2, 1, 1.4, 4])
+    if b[1].button("➕ Building", use_container_width=True):
+        building_dialog()
+    if "pending_building" in ss:
+        ss.mt_building = ss.pop("pending_building")
+    bids = [bld["id"] for bld in mt["buildings"]]
+    if ss.get("mt_building") not in bids:
+        ss.mt_building = bids[0]
+    names = {bld["id"]: f"🏢 {bld['name']}" for bld in mt["buildings"]}
+    b[0].selectbox("Building", bids, format_func=names.get, key="mt_building", label_visibility="collapsed",
+                   help="New measurements are booked to this building")
+    zones = ["", *admin.zones(ss.admin)]
+    if ss.get("mt_level", "") not in zones:  # a level typed in an older version, or a zone removed in Administration
+        zones.append(ss.mt_level)
+    b[2].selectbox("Level / zone", zones, key="mt_level", format_func=lambda z: z or "Level / zone…", label_visibility="collapsed",
+                   help="Zone for new measurements — the list is Administration → Standard Zones")
     c = st.columns([0.01, 3.2, 1, 1, 0.9, 0.9, 1.6])
     if c[2].button("➕ New item", use_container_width=True):
         new_item_dialog()
@@ -1006,7 +1587,7 @@ def ribbon_dimension() -> None:
         c[1].caption("No items yet — click ➕ New item")
     c[4].number_input("× Times", 0.01, 1000.0, 1.0, step=1.0, key="mt_times", label_visibility="collapsed",
                       help="Timesing for the next measurements, e.g. 4 for four identical floors")
-    c[5].toggle("Deduct", False, key="mt_deduct", help="Next measurements are subtracted (openings)")
+    c[5].toggle("Deduct", key="mt_deduct", help="Next measurements are subtracted (openings) — same as Home → −ve")
     c[6].text_input("Location", key="mt_loc", placeholder="Location / wall ref", label_visibility="collapsed",
                     help="Grid or location; for blockwork, the wall reference (e.g. W-01)")
 
@@ -1021,23 +1602,41 @@ def item_params_form(item: dict | None) -> None:
         if measure.is_assembly(item):
             st.caption(asm.TEMPLATES[item["assembly"]]["help"])
             params = {**asm.TEMPLATES[item["assembly"]]["params"], **item.get("params", {})}
+            exprs = item.get("param_exprs", {})
+            names = ", ".join(admin.variables(ss.admin)) or "none"
+            st.caption(f"Type a number, a standard variable or a formula, e.g. `storey_h - slab_t`. Variables: {names}")
             cols = st.columns(2)
             for i, (key, value) in enumerate(params.items()):
-                values[key] = cols[i % 2].number_input(asm.PARAM_LABELS.get(key, key), value=float(value), step=0.05, format="%.3f")
+                values[key] = cols[i % 2].text_input(asm.PARAM_LABELS.get(key, key), exprs.get(key, f"{float(value):g}"), key=f"pf_{item['id']}_{key}")
         else:
             a, b = st.columns(2)
             values["width"] = a.number_input("Width / height (m)", 0.0, 1000.0, float(item["width"]), 0.05, disabled=item["type"] != "Length")
             values["depth"] = b.number_input("Depth / thickness (m)", 0.0, 1000.0, float(item["depth"]), 0.05, disabled=item["type"] == "Count")
         if st.form_submit_button("Save", type="primary"):
-            item["description"] = desc.strip() or item["description"]
             if measure.is_assembly(item):
-                item["params"] = values
+                variables, numbers, formulas, bad = admin.variables(ss.admin), {}, {}, []
+                for key, text in values.items():
+                    try:
+                        numbers[key] = admin.evaluate(text, variables)
+                    except ValueError as exc:
+                        bad.append(f"{asm.PARAM_LABELS.get(key, key)}: {exc}")
+                        continue
+                    try:
+                        float(str(text).strip())
+                    except ValueError:
+                        formulas[key] = str(text).strip()  # keep the formula so it follows the variables
+                if bad:
+                    st.error("Not saved — " + "; ".join(bad))
+                    return
+                item["params"], item["param_exprs"] = numbers, formulas
+                item["description"] = desc.strip() or item["description"]
             else:
+                item["description"] = desc.strip() or item["description"]
                 item.update(values)
             ss.mt_ver += 1
             st.rerun()
     if item.get("assembly") == "blockwork_wall":
-        st.caption("Doors and windows for this wall type are assigned in 🗂️ Dimension Group View → Openings.")
+        st.caption("Doors and windows for this wall type are assigned in 🗂️ Dimension View → click the group → 🚪 Openings.")
 
 
 def ribbon_workbook() -> None:
@@ -1168,7 +1767,8 @@ def guides_for(mt: dict, doc: str, page: int, k: float, mpu: float | None) -> li
     return out
 
 
-def view_drawing() -> None:
+def view_drawing(highlight: list[str] | None = None) -> None:
+    """The measuring canvas. highlight: measurement ids to emphasise (Dimension View → click a group)."""
     mt = ss.mt
     doc, page = current_drawing()
     if doc is None:
@@ -1178,8 +1778,9 @@ def view_drawing() -> None:
     data = ss.files[doc]
     is_pdf = doc.lower().endswith(".pdf")
     detail = ss.get("mt_dpi", "Standard")
+    hidden = tuple(sorted(ss.hidden_layers.get(doc, []))) if is_dxf(doc) else ()
     try:
-        image_url, k, snap, known_scale = cached_measure_image(data, doc, page, {"Standard": 110, "Fine": 160, "Draft": 72}[detail])
+        image_url, k, snap, known_scale = cached_measure_image(data, doc, page, {"Standard": 110, "Fine": 160, "Draft": 72}[detail], hidden)
     except Exception as exc:
         st.error(f"Could not open this drawing for measuring: {exc}")
         return
@@ -1229,9 +1830,12 @@ def view_drawing() -> None:
     else:
         mode = "select"
     show_code = len(mt["buildings"]) > 1
+    one_sign = ss.mt_show != "Both"  # Home → ± Both off: show only the sign being measured
     canvas_shapes = []
     for s in (s for s in mt["shapes"] if s["doc"] == doc and s["page"] == page):
         it = measure.item_by_id(mt, s["item_id"])
+        if one_sign and bool(s.get("deduct")) != bool(ss.get("mt_deduct")):
+            continue
         if it and it.get("visible", True):
             code = f" {measure.building_by_id(mt, s.get('building', 1))['code']}" if show_code else ""
             ref = f" {s['location']}" if s.get("location") and it.get("assembly") == "blockwork_wall" else ""
@@ -1245,6 +1849,8 @@ def view_drawing() -> None:
         item=f"{active['ref']} {active['description']}" if active and mode != "calibrate" else "",
         snap=snap, snap_on=ss.get("mt_snap", True), selected=ss.mt_selected, height=int(ss.opts["canvas_height"]), key="mt_canvas",
         guides=guides_for(mt, doc, page, k, mpu) if ss.get("mt_guides", True) else [],
+        highlight=highlight, command=ss.pop("canvas_cmd", None), fill=True,  # fill the window down to the status bar
+        toolbar=False,  # pan / zoom / undo / finish are in the quick-access bar and the ribbon
     )
     if event and event.get("id") not in mt["seen"]:
         mt["seen"].append(event["id"])
@@ -1290,47 +1896,149 @@ def view_drawing() -> None:
         st.rerun()
 
 
-def view_groups() -> None:
-    """Dimension groups: buildings and levels → take-off items and their parameters → openings → measurements."""
+def view_dimension() -> None:
+    """Dimension View: drawings, layers, models and view on the left; dimension groups below; the drawing on the right,
+    with the selected group's measurements highlighted."""
     mt = ss.mt
-    sheet = measure.qto_sheet(mt)
+    doc, page = current_drawing()
+    left, right = st.columns([1.05, 2.6])
+    with left:
+        t_draw, t_lay, t_model, t_view = st.tabs(["🗺️ Drawings", "📑 Layers", "🧊 Model", "👁️ View"])
+        with t_draw:
+            names = measurable_files()
+            if not names:
+                st.caption("No drawings — Drawings tab → 📂 Drawings.")
+            for name in names:
+                n = sum(1 for s in mt["shapes"] if s["doc"] == name)
+                icon = "📐" if is_dxf(name) else "📄" if name.lower().endswith(".pdf") else "🖼️"
+                st.button(f"{icon} {name} · {n}", key=f"dv_doc_{name}", use_container_width=True, on_click=open_doc, args=(name,),
+                          type="primary" if name == doc else "secondary", help="Open this drawing (number = measurements on it)")
+        with t_lay:
+            if not is_dxf(doc):
+                st.caption("Layers are available on DXF drawings. PDFs and scans are flat images.")
+            else:
+                a, b = st.columns(2)
+                a.button("👁️ Show all", key="dv_lay_all", use_container_width=True, on_click=layers_cmd, args=("all",))
+                b.button("🔄 Invert", key="dv_lay_inv", use_container_width=True, on_click=layers_cmd, args=("invert",))
+                new_hidden = layers_editor(doc, "dv_layers")
+                if new_hidden is not None:
+                    ss.hidden_layers[doc] = new_hidden
+                    ss.layer_ver += 1
+                    st.rerun()
+        with t_model:
+            if not ss.models:
+                st.caption("No 3D models yet.")
+            for name in ss.models:
+                if st.button(f"🧊 {name}", key=f"dv_model_{name}", use_container_width=True):
+                    ss.pending_model, ss.nav_pending = name, NAV[5]
+                    st.rerun()
+            st.button("➕ Upload in 3D Models", key="dv_model_up", on_click=go_to, args=(NAV[5],), use_container_width=True)
+        with t_view:
+            a, b = st.columns(2)
+            a.button("🎯 Reset", key="dv_reset", use_container_width=True, on_click=view_cmd, args=("reset",))
+            b.button("↻ Rotate 90", key="dv_rot", use_container_width=True, on_click=view_cmd, args=("rotate",))
+            a.button("⛶ Extents", key="dv_ext", use_container_width=True, on_click=view_cmd, args=("extents",))
+            b.button("🔍 Zoom area", key="dv_area", use_container_width=True, on_click=view_cmd, args=("window",))
+            a.button("± Both signs" if ss.mt_show == "Both" else "± One sign", key="dv_both", use_container_width=True,
+                     on_click=show_both_cmd)
 
-    st.markdown("#### 🏢 Buildings and levels")
-    st.caption("Heights and depths are calculated from these levels. Blank start level = NGL; blank BGB = start level.")
-    counts = {b["name"]: int((sheet["Building"] == b["name"]).sum()) for b in mt["buildings"]}
-    rows = [{"Code": b["code"], "Building": b["name"], "Measurements": counts[b["name"]], **{k: b["levels"].get(k) for k in asm.LEVELS}}
-            for b in mt["buildings"]]
-    level_cfg = {k: st.column_config.NumberColumn(asm.LEVEL_LABELS[k], format="%.3f", step=0.05) for k in asm.LEVELS}
-    frame = pd.DataFrame(rows).astype({k: float for k in asm.LEVELS})  # blank levels become NaN, not text
-    edited_b = st.data_editor(frame, key=f"mt_buildings_{ss.mt_ver}", hide_index=True, disabled=["Code", "Measurements"],
-                              column_config={"Building": st.column_config.TextColumn(width="medium", required=True), **level_cfg})
-    changed = False
-    for b, (_, r) in zip(mt["buildings"], edited_b.iterrows()):
-        name = str(r["Building"] or "").strip()
-        if name and name != b["name"]:
-            b["name"], changed = name, True
-        for key in asm.LEVELS:
-            value = None if pd.isna(r[key]) else float(r[key])
-            if key in ("NGL", "FFL", "soffit") and value is None:
-                value = asm.LEVELS[key]
-            if b["levels"].get(key) != value:
-                b["levels"][key], changed = value, True
-    if changed:
+        t_dims, t_auto = st.tabs(["🗂️ Dimensions", "🔢 Auto Count"])
+        with t_dims:
+            highlight = dimension_groups_panel(doc)
+        with t_auto:
+            auto_count_panel(doc, page)
+    with right:
+        view_drawing(highlight=highlight)
+    if mt["items"]:
+        with st.expander("✏️ Edit all dimension groups (show/hide, description, discipline, section, delete)"):
+            edit_groups_table()
+
+
+def dimension_groups_panel(doc: str | None) -> list[str] | None:
+    """Table of dimension groups; clicking one makes it active and returns its measurement ids to highlight."""
+    mt = ss.mt
+    if not mt["items"]:
+        st.caption("No dimension groups yet — Home → Measure → ➕ Add.")
+        return None
+    totals = measure.group_totals(mt)
+    rows = []
+    for it in mt["items"]:
+        part = totals[totals["Item"] == it["ref"]]
+        rows.append({"": "●", "Ref": it["ref"], "Description": it["description"],
+                     "Qty": round(float(part["Quantity"].sum()), 3), "Unit": measure.item_unit(it["type"], 0 if measure.is_assembly(it) else it["width"],
+                                                                                      0 if measure.is_assembly(it) else it["depth"]),
+                     "Nr": int(part["Measurements"].sum())})
+    colours = [it["colour"] for it in mt["items"]]
+    table = pd.DataFrame(rows).style.apply(lambda col: [f"color: {c}" for c in colours], subset=[""])
+    event = st.dataframe(table, key="dv_groups", on_select="rerun", selection_mode="single-row", hide_index=True, height=230,
+                         column_config={"": st.column_config.TextColumn(width="small"),"Qty": st.column_config.NumberColumn(format=qfmt())})
+    picked = event.selection.rows if event else []
+    item = mt["items"][picked[0]] if picked and picked[0] < len(mt["items"]) else None
+    clicked = item is not None and ss.dim_hl_item != item["id"]
+    ss.dim_hl_item = item["id"] if item else None
+    if item is None:
+        st.caption("Click a group to highlight its measurements on the drawing.")
+        return None
+    if clicked and ss.get("mt_active") != item["id"]:  # measure into the group just clicked
+        ss.pending_active = item["id"]
+        st.rerun()
+    shapes = [s for s in mt["shapes"] if s["item_id"] == item["id"]]
+    a, b, c = st.columns(3)
+    if a.button("⚙️ Property", key="dv_prop", use_container_width=True):
+        item_dialog(item["id"])
+    visible = item.get("visible", True)
+    if b.button("🙈 Hide" if visible else "👁️ Show", key="dv_vis", use_container_width=True):
+        item["visible"] = not visible
         ss.mt_ver += 1
         st.rerun()
-    empty = [b for b in mt["buildings"] if counts[b["name"]] == 0]
-    if len(mt["buildings"]) > 1 and empty:
-        with st.popover("🗑️ Remove empty building"):
-            gone = st.selectbox("Building", [b["id"] for b in empty], format_func=lambda i: measure.building_by_id(mt, i)["name"])
-            if st.button("Remove", key="mt_rm_building"):
-                measure.delete_building(mt, gone)
-                ss.mt_ver += 1
-                st.rerun()
+    with c.popover("🗑️ Delete", use_container_width=True):
+        st.caption(f"Delete {item['ref']} and its {len(shapes)} measurements?")
+        if st.button("Delete group", key="dv_del", type="primary"):
+            mt["items"] = [i for i in mt["items"] if i["id"] != item["id"]]
+            mt["shapes"] = [s for s in mt["shapes"] if s["item_id"] != item["id"]]
+            ss.mt_ver += 1
+            st.rerun()
+    elsewhere = sorted({s["doc"] for s in shapes if s["doc"] not in (doc, measure.MANUAL_DOC)})
+    for name in elsewhere:
+        st.button(f"↪ Also on {name}", key=f"dv_go_{name}", on_click=open_doc, args=(name,), use_container_width=True)
+    sheet = measure.qto_sheet(mt)
+    mine = sheet[sheet["Shape"].isin([s["id"] for s in shapes])]
+    if not mine.empty:
+        st.dataframe(mine[["Building", "Level", "Drawing", "Location", "Timesing", "Deduct", "Quantity"]], hide_index=True, height=180,
+                     column_config={"Quantity": st.column_config.NumberColumn(format=qfmt())})
+    if item.get("assembly") == "blockwork_wall":
+        with st.expander("🚪 Openings (door / window schedule)"):
+            render_openings(item)
+    return [s["id"] for s in shapes]
 
-    st.markdown("#### 🗂️ Dimension groups")
-    if not mt["items"]:
-        st.caption("No take-off items yet. Dimension tab → ➕ New item.")
+
+def auto_count_panel(doc: str | None, page: int) -> None:
+    if doc is None:
+        st.caption("Open a drawing first.")
         return
+    objects = auto_count_objects(ss.files[doc], doc, page)
+    if not objects:
+        st.caption("Nothing to count here. DXF: block references (doors, fittings, lights). PDF: marks such as D1, W2, C12. "
+                   "Scans have no objects — use Measure with a Count group.")
+        return
+    table = auto_count_table(objects)
+    done = {i.get("auto_key") for i in ss.mt["items"]}
+    table["Done"] = [f"{doc}|{page}|{k}" in done for k in table["Key"]]
+    event = st.dataframe(table.drop(columns="Key"), key=f"dv_auto_{doc}_{page}", on_select="rerun", selection_mode="multi-row",
+                         hide_index=True, height=230, column_config={"Done": st.column_config.CheckboxColumn(width="small")})
+    picked = list(table["Key"].iloc[event.selection.rows]) if event and event.selection.rows else []
+    a, b = st.columns(2)
+    if a.button(f"➕ Create {len(picked)}", key="dv_auto_make", use_container_width=True, disabled=not picked,
+                help="One Count dimension group per selected row"):
+        ss.project_msg = f"Auto count: {create_auto_counts(picked, doc, page, objects)} dimension groups created"
+        st.rerun()
+    if b.button("✅ Accept All", key="dv_auto_all", use_container_width=True, type="primary"):
+        ss.project_msg = f"Auto count: {create_auto_counts(list(table['Key']), doc, page, objects)} dimension groups created"
+        st.rerun()
+
+
+def edit_groups_table() -> None:
+    mt = ss.mt
     totals = measure.group_totals(mt)
     rows = []
     for it in mt["items"]:
@@ -1372,44 +2080,6 @@ def view_groups() -> None:
     if changed:
         ss.mt_ver += 1
         st.rerun()
-
-    assemblies_ = [it for it in mt["items"] if measure.is_assembly(it)]
-    if assemblies_:
-        st.markdown("#### ⚙️ Assembly parameters")
-        st.caption("Change a parameter and every derived quantity (excavation, blinding, concrete…) updates without re-measuring.")
-        for it in assemblies_:
-            spec = asm.TEMPLATES[it["assembly"]]
-            with st.expander(f"{it['ref']} · {it['description']} — {spec['label']}"):
-                st.caption(spec["help"])
-                params = {**spec["params"], **it.get("params", {})}
-                table = pd.DataFrame([{"Parameter": asm.PARAM_LABELS.get(k, k), "Value": float(v), "_k": k} for k, v in params.items()])
-                edited = st.data_editor(table.set_index("_k"), key=f"ap_{it['id']}_{ss.mt_ver}", disabled=["Parameter"],
-                                        column_config={"_index": None, "Value": st.column_config.NumberColumn(format="%.3f", step=0.05)})
-                new_params = {k: float(v) for k, v in edited["Value"].items() if pd.notna(v)}
-                if new_params != {k: float(v) for k, v in params.items()}:
-                    it["params"] = new_params
-                    ss.mt_ver += 1
-                    st.rerun()
-                if it["assembly"] == "blockwork_wall":
-                    render_openings(it)
-
-    st.markdown("#### 🌳 By building")
-    for b in mt["buildings"]:
-        part = sheet[sheet["Building"] == b["name"]]
-        with st.expander(f"🏢 {b['name']} ({b['code']}) — {len(part)} measurements", expanded=len(mt["buildings"]) == 1):
-            if part.empty:
-                st.caption("Nothing measured in this building yet.")
-                continue
-            for it in mt["items"]:
-                rows_it = part[(part["Description"] == it["description"]) & part["BOQ Ref"].str.startswith(it["ref"])]
-                if rows_it.empty:
-                    continue
-                unit = measure.item_unit(it["type"], it["width"], it["depth"])
-                st.markdown(f"<span style='color:{it['colour']}'>●</span> **{it['ref']} · {it['description']}** — "
-                            f"{rows_it['Quantity'].dropna().sum():,.3f} {unit} ({len(rows_it)} measurements)", unsafe_allow_html=True)
-                st.dataframe(rows_it[["Level", "Drawing", "Page", "Location", "Timesing", "Deduct", "Measured", "Quantity"]],
-                             hide_index=True, column_config={"Quantity": st.column_config.NumberColumn(format=qfmt()),
-                                                             "Measured": st.column_config.NumberColumn(format="%.3f")})
 
 
 def render_openings(item: dict) -> None:
@@ -1614,12 +2284,17 @@ def view_auto2d() -> None:
 def view_3d() -> None:
     models = st.file_uploader("Upload 3D models (IFC, OBJ, STL, PLY, GLB, OFF)", type=["ifc", *mesh_takeoff.MESH_TYPES],
                               accept_multiple_files=True, key="up_3d")
-    if not models:
+    for m in models or []:  # kept for the session so Dimension View → Model can list them
+        ss.models.setdefault(m.name, m.getvalue())
+    if not ss.models:
         st.info("Upload an IFC model exported from Revit, ArchiCAD, Tekla, Civil 3D or Allplan for an element-by-element take-off.")
         return
-    name = st.selectbox("Model", [m.name for m in models], key="model_pick")
-    payload = next(m for m in models if m.name == name).getvalue()
-    (render_ifc if name.lower().endswith(".ifc") else render_mesh)(name, payload)
+    if "pending_model" in ss:
+        ss.model_pick = ss.pop("pending_model")
+    if ss.get("model_pick") not in ss.models:
+        ss.model_pick = next(iter(ss.models))
+    name = st.selectbox("Model", list(ss.models), key="model_pick")
+    (render_ifc if name.lower().endswith(".ifc") else render_mesh)(name, ss.models[name])
 
 
 def view_schedules() -> None:
@@ -1842,20 +2517,38 @@ with st.sidebar:
     st.caption("The free server keeps nothing: File → 💾 Save before closing.")
 
 doc_name, page_no = current_drawing()
-st.markdown(f"<div class='titlebar'><b>📐 QTO Studio</b><span>{ss.p_name}</span><span>·</span><span>{ss.nav}</span>"
-            f"<span>·</span><span>{doc_name or 'no drawing'}{f' p{page_no + 1}' if doc_name else ''}</span></div>", unsafe_allow_html=True)
+maximised = ss.ui_max and ss.nav in (NAV[0], NAV[2])
+if maximised:  # drawing gets the whole window: no side rail, no ribbon, slim margins
+    st.markdown("<style>section[data-testid='stSidebar'], div[data-testid='stSidebarCollapsedControl'] {display: none;}"
+                ".block-container {padding: .3rem .5rem .3rem;} .titlebar {padding: .2rem .8rem; margin-bottom: .15rem;}</style>",
+                unsafe_allow_html=True)
+if ss.ribbon_min or maximised:  # the ribbon is still drawn (its settings stay alive), just hidden
+    st.markdown("<style>.st-key-qto_ribbon {display: none;}</style>", unsafe_allow_html=True)
+with st.container(key="qto_bar"):
+    on_drawing = ss.nav in (NAV[0], NAV[2])
+    t, quick, b1, b2 = st.columns([5.2, 6.8, 1.1, 1.3] if on_drawing else [11.9, 0.1, 1.1, 1.3], vertical_alignment="center")
+    if on_drawing:  # quick-access drawing tools: always in reach, also with the ribbon minimised or the drawing maximised
+        for col, (icon, name, tip) in zip(quick.columns(len(QUICK_TOOLS)), QUICK_TOOLS):
+            col.button(icon, key=f"qa_{name}", use_container_width=True, help=tip, on_click=view_cmd, args=(name,))
+    t.markdown(f"<div class='titlebar'><b>📐 QTO Studio</b><span>{ss.p_name}</span><span>·</span><span>{ss.nav}</span>"
+               f"<span>·</span><span>{doc_name or 'no drawing'}{f' p{page_no + 1}' if doc_name else ''}</span></div>", unsafe_allow_html=True)
+    b1.button("▾ Ribbon" if ss.ribbon_min else "▴ Ribbon", key="bar_ribbon", use_container_width=True, disabled=maximised,
+              on_click=toggle_ui, args=("ribbon_min",), help="Show / minimise the ribbon (tools stay as you left them)")
+    b2.button("🗗 Restore" if maximised else "⛶ Maximise", key="bar_max", use_container_width=True, on_click=toggle_ui, args=("ui_max",),
+              help="Drawing fills the window: hides the side rail and the ribbon. Measuring keys still work (Enter, Esc, +/−).")
 
-r_file, r_home, r_draw, r_dim, r_wb = st.tabs(["File", "Home", "Drawings", "Dimension", "Workbook"])
-with r_file:
-    ribbon_file()
-with r_home:
-    ribbon_home(issue_count)
-with r_draw:
-    ribbon_drawings()
-with r_dim:
-    ribbon_dimension()
-with r_wb:
-    ribbon_workbook()
+with st.container(key="qto_ribbon"):
+    r_file, r_home, r_draw, r_dim, r_wb = st.tabs(["File", "Home", "Drawings", "Dimension", "Workbook"])
+    with r_file:
+        ribbon_file()
+    with r_home:
+        ribbon_home(issue_count)
+    with r_draw:
+        ribbon_drawings()
+    with r_dim:
+        ribbon_dimension()
+    with r_wb:
+        ribbon_workbook()
 
 view = ss.nav
 if view == NAV[0]:
@@ -1863,7 +2556,7 @@ if view == NAV[0]:
 elif view == NAV[1]:
     view_workbook()
 elif view == NAV[2]:
-    view_groups()
+    view_dimension()
 elif view == NAV[3]:
     view_check(issues)
 elif view == NAV[4]:
