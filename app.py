@@ -87,6 +87,18 @@ div[data-testid="stTabs"] div[data-testid="stPopover"] button {padding: .2rem .3
 .st-key-qto_ribbon div[data-baseweb="select"] > div, .st-key-qto_ribbon input {min-height: 1.75rem; font-size: .75rem;}
 .st-key-qto_ribbon div[data-baseweb="select"] > div > div {padding-top: 0; padding-bottom: 0;}
 .st-key-qto_ribbon div[data-testid="stRadio"] label p, .st-key-qto_ribbon div[data-testid="stToggle"] label p {font-size: .75rem;}
+/* Home and File ribbons: each group and button as wide as its label; groups wrap to a new line instead of cutting labels */
+.st-key-rb_home div[data-testid="stHorizontalBlock"], .st-key-rb_file div[data-testid="stHorizontalBlock"] {flex-wrap: wrap;}
+.st-key-rb_home div[data-testid="stColumn"], .st-key-rb_home div[data-testid="column"],
+.st-key-rb_file div[data-testid="stColumn"], .st-key-rb_file div[data-testid="column"] {flex: 0 0 auto !important; width: auto !important; min-width: 0 !important;}
+.st-key-qto_ribbon button p {white-space: nowrap !important; overflow: visible !important; text-overflow: clip !important;}
+.st-key-rb_home button div[data-testid="stMarkdownContainer"], .st-key-rb_file button div[data-testid="stMarkdownContainer"]
+  {overflow: visible; text-overflow: clip; max-width: none;}
+/* Streamlit's own top bar: slim and see-through so it does not cover the title bar */
+header[data-testid="stHeader"] {height: 2.1rem; min-height: 2.1rem; background: transparent;}
+.block-container {padding-top: 2.2rem;}
+.titlebar {white-space: nowrap; overflow: hidden; padding: .3rem .9rem; margin-bottom: 0;}
+.titlebar span {overflow: hidden; text-overflow: ellipsis; min-width: 0;}
 .st-key-qto_bar div[data-testid="stButton"] button {padding: 0 .4rem; min-height: 1.9rem; font-size: .75rem;}
 .st-key-qto_bar div[data-testid="stButton"] button p {font-size: .75rem;}
 .statusbar {background: #0f172a; color: #e2e8f0; font-size: .8rem; padding: .3rem .8rem; border-radius: 8px; margin-top: .25rem;}
@@ -1408,9 +1420,10 @@ def dlg_administration() -> None:
 
 
 def ribbon_home(issue_count: int) -> None:
-    """Six groups like a desktop take-off package: Drawing · View · Format · Administration / Measure · Workbooks."""
-    row1 = st.columns([2.6, 10, 1.1, 1.5, 1.3])
-    with row1[0].container(border=True):
+    """Groups like a desktop take-off package: Drawing · View · Measure · Workbooks · Format & Administration.
+    The groups size to their buttons and wrap to a second line on narrow screens (see the rb_home CSS)."""
+    g_draw, g_view, g_measure, g_work, g_admin = st.columns(5)
+    with g_draw.container(border=True):
         st.caption("DRAWING")
         c = st.columns(3)
         if c[0].button("🗺️ Drawing", key="h_draw", use_container_width=True, help="Open a drawing"):
@@ -1419,7 +1432,7 @@ def ribbon_home(issue_count: int) -> None:
             dlg_property()
         if c[2].button("🔍 Compare", key="h_cmp", use_container_width=True, help="Overlay two drawings or revisions"):
             dlg_compare()
-    with row1[1].container(border=True):
+    with g_view.container(border=True):
         st.caption("VIEW")
         c = st.columns(11)
         c[0].button("👁️ All Layers", key="h_all", use_container_width=True, on_click=layers_cmd, args=("all",))
@@ -1433,20 +1446,16 @@ def ribbon_home(issue_count: int) -> None:
             ("↻ Rotate 90", "rotate", "Turn the view; measurements stay correct"), ("🎯 Reset View", "reset", "Unrotate and fit the sheet"),
         ]):
             col.button(label, key=f"h_v_{name}", use_container_width=True, on_click=view_cmd, args=(name,), help=tip)
-    with row1[2].container(border=True):
-        st.caption("FORMAT")
-        if st.button("🎨 Format", key="h_fmt", use_container_width=True):
+    with g_admin.container(border=True):
+        st.caption("FORMAT & ADMINISTRATION")
+        c = st.columns(3)
+        if c[0].button("🎨 Format", key="h_fmt", use_container_width=True):
             dlg_format()
-    with row1[3].container(border=True):
-        st.caption("ADMINISTRATION")
-        if st.button("🛡️ Administration", key="h_admin", use_container_width=True):
+        if c[1].button("🛡️ Administration", key="h_admin", use_container_width=True):
             dlg_administration()
-    with row1[4].container(border=True):
-        st.caption("CHECK")
-        st.button(f"✅ {issue_count} errors" if issue_count else "✅ OK", key="h_check", use_container_width=True,
-                  type="primary" if issue_count else "secondary", on_click=go_to, args=(NAV[3],))
-    row2 = st.columns([9, 6])
-    with row2[0].container(border=True):
+        c[2].button(f"✅ {issue_count} errors" if issue_count else "✅ Check", key="h_check", use_container_width=True,
+                    type="primary" if issue_count else "secondary", on_click=go_to, args=(NAV[3],), help="Project check and self-test")
+    with g_measure.container(border=True):
         st.caption("MEASURE")
         c = st.columns(9)
         if c[0].button("➕ Add", key="h_m_add", use_container_width=True, help="New dimension group"):
@@ -1467,7 +1476,7 @@ def ribbon_home(issue_count: int) -> None:
             dlg_manual()
         if c[8].button("✅ Accept All", key="h_accept", use_container_width=True, help="Auto count every block / mark on this drawing"):
             dlg_accept_all()
-    with row2[1].container(border=True):
+    with g_work.container(border=True):
         st.caption("WORKBOOKS")
         c = st.columns(6)
         if c[0].button("➕ Add", key="h_w_add", use_container_width=True, help="Add a BOQ line (from the code library)"):
@@ -2520,7 +2529,7 @@ doc_name, page_no = current_drawing()
 maximised = ss.ui_max and ss.nav in (NAV[0], NAV[2])
 if maximised:  # drawing gets the whole window: no side rail, no ribbon, slim margins
     st.markdown("<style>section[data-testid='stSidebar'], div[data-testid='stSidebarCollapsedControl'] {display: none;}"
-                ".block-container {padding: .3rem .5rem .3rem;} .titlebar {padding: .2rem .8rem; margin-bottom: .15rem;}</style>",
+                ".block-container {padding: 2.2rem .5rem .3rem;} .titlebar {padding: .2rem .8rem; margin-bottom: .15rem;}</style>",
                 unsafe_allow_html=True)
 if ss.ribbon_min or maximised:  # the ribbon is still drawn (its settings stay alive), just hidden
     st.markdown("<style>.st-key-qto_ribbon {display: none;}</style>", unsafe_allow_html=True)
@@ -2539,9 +2548,9 @@ with st.container(key="qto_bar"):
 
 with st.container(key="qto_ribbon"):
     r_file, r_home, r_draw, r_dim, r_wb = st.tabs(["File", "Home", "Drawings", "Dimension", "Workbook"])
-    with r_file:
+    with r_file, st.container(key="rb_file"):
         ribbon_file()
-    with r_home:
+    with r_home, st.container(key="rb_home"):
         ribbon_home(issue_count)
     with r_draw:
         ribbon_drawings()
