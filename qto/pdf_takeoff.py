@@ -222,6 +222,24 @@ def drawing_objects(data: bytes, page_no: int, limit: int = 60_000) -> list[dict
     return objects
 
 
+MARK = re.compile(r"^[A-Z]{1,3}-?\d{1,3}[A-Z]?$")
+
+
+def mark_objects(data: bytes, page_no: int) -> list[dict]:
+    """Door, window, column and fixture marks (D1, W-02, C12…) written on a page, with their positions, for auto count."""
+    out = []
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        page = pdf.pages[page_no]
+        bx0, btop = page.bbox[0], page.bbox[1]
+        for word in page.extract_words():
+            text = re.sub(r"^[^\w]+|[^\w]+$", "", word["text"]).upper()
+            if MARK.match(text):
+                cx, cy = (word["x0"] + word["x1"]) / 2 - bx0, (word["top"] + word["bottom"]) / 2 - btop
+                out.append({"kind": "insert", "key": f"mark:{text}", "label": f"mark {text}", "pts": [(cx, cy)],
+                            "center": (cx, cy), "closed": False, "area": 0.0, "perimeter": 0.0})
+    return out
+
+
 def render_for_measure(data: bytes, page_no: int, dpi: int = 110):
     """(image, pixels per PDF point) for on-screen measuring; very large sheets get a lower resolution."""
     with pdfplumber.open(io.BytesIO(data)) as pdf:

@@ -163,6 +163,17 @@ def add_shape(state: dict, item_id: int, doc: str, page: int, points: list, buil
     return shape
 
 
+MANUAL_DOC = "Manual"
+
+
+def add_manual(state: dict, item_id: int, value: float, building: int = 1, level: str = "", location: str = "",
+               timesing: float = 1.0, deduct: bool = False) -> dict:
+    """A typed dimension (no drawing): value in the item's base unit — nr, m or m²."""
+    shape = add_shape(state, item_id, MANUAL_DOC, 0, [], building=building, level=level)
+    shape.update({"manual": float(value), "location": location, "timesing": float(timesing or 1.0), "deduct": bool(deduct)})
+    return shape
+
+
 def _length(pts) -> float:
     return sum(math.dist(a, b) for a, b in zip(pts, pts[1:]))
 
@@ -172,7 +183,9 @@ def _area(pts) -> float:
 
 
 def measured(shape: dict, item: dict, m_per_unit: float | None) -> float | None:
-    """Raw measured value: number of points, metres of run, or square metres of area."""
+    """Raw measured value: number of points, metres of run, or square metres of area (or a typed manual value)."""
+    if shape.get("manual") is not None:
+        return float(shape["manual"])
     pts = shape["points"]
     if item["type"] == "Count":
         return float(len(pts))
@@ -275,7 +288,11 @@ def shapes_for(state: dict, item: dict, building_id: int | None) -> tuple[list[a
         mpu = state["calibration"].get(page_key(s["doc"], s["page"]))
         pts = s["points"]
         shape = asm.Shape(timesing=float(s.get("timesing") or 1.0), deduct=bool(s.get("deduct")), ref=s.get("location", ""))
-        if item["type"] == "Count":
+        if s.get("manual") is not None:  # typed dimension: the value is already in the base unit
+            value = float(s["manual"])
+            shape.count, shape.length, shape.area = (value, 0.0, 0.0) if item["type"] == "Count" else \
+                (0.0, value, 0.0) if item["type"] == "Length" else (0.0, 0.0, value)
+        elif item["type"] == "Count":
             shape.count = float(len(pts))
         elif not mpu:
             unscaled += 1
@@ -421,7 +438,7 @@ def check_project(state: dict) -> pd.DataFrame:
     unscaled_pages = set()
     for s in state["shapes"]:
         item = item_by_id(state, s["item_id"])
-        if item and item["type"] != "Count" and not state["calibration"].get(page_key(s["doc"], s["page"])):
+        if item and item["type"] != "Count" and s.get("manual") is None and not state["calibration"].get(page_key(s["doc"], s["page"])):
             unscaled_pages.add((s["doc"], s["page"] + 1))
     for doc, page in sorted(unscaled_pages):
         issues.append({"Severity": "Error", "Item": "—", "Building": "—",

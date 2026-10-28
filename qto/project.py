@@ -37,6 +37,7 @@ def snapshot(state) -> dict:
         "boq": state["boq"].to_dict("records"),
         "rates": state["rates"].to_dict("records"),
         "takeoff": {k: takeoff[k] for k in measure.TAKEOFF_KEYS if k in takeoff},
+        "admin": state.get("admin", {}),
     }
 
 
@@ -51,6 +52,9 @@ def restore(state, data: dict) -> None:
     state["boq"] = boq.finalise(lines) if not lines.empty else boq.empty()
     library = pd.DataFrame(data.get("rates") or [], columns=rates.COLUMNS)
     state["rates"] = rates.tidy(library, drop_blank=False) if not library.empty else rates.empty()
+    from . import admin
+
+    state["admin"] = admin.upgrade(data.get("admin"))
     seen = state["mt"]["seen"] if "mt" in state else []
     state["mt"] = measure.from_dict(data.get("takeoff") or {})
     state["mt"]["seen"] = seen  # the canvas still holds its last event; don't replay it in the new project

@@ -226,7 +226,11 @@ def _block_table(top_inserts: pd.DataFrame) -> pd.DataFrame:
     return table[columns]
 
 
-def render_image(result: DxfResult, max_side: int = 4000, margin: int = 40):
+def layer_names(result: DxfResult) -> list[str]:
+    return sorted({layer for layer, _, _ in result.preview} | set(result.markers["Layer"]))
+
+
+def render_image(result: DxfResult, max_side: int = 4000, margin: int = 40, hidden_layers=()):
     """Draw the measured geometry as an image for on-screen take-off.
 
     Returns (image, metres per pixel, flat list of snap points in pixels). The scale is exact,
@@ -241,8 +245,11 @@ def render_image(result: DxfResult, max_side: int = 4000, margin: int = 40):
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
 
+    hidden = set(hidden_layers)
     snap, seen = [], set()
     for _layer, px, py in result.preview:
+        if _layer in hidden:  # layer switched off (the frame keeps its size so measurements stay in place)
+            continue
         run = []
         for x, y in list(zip(px, py)) + [(None, None)]:
             if x is None:
@@ -256,7 +263,9 @@ def render_image(result: DxfResult, max_side: int = 4000, margin: int = 40):
                 run = []
             else:
                 run.append(to_px(x, y))
-    for x, y in zip(result.markers["X"], result.markers["Y"]):
+    for x, y, layer in zip(result.markers["X"], result.markers["Y"], result.markers["Layer"]):
+        if layer in hidden:
+            continue
         cx, cy = to_px(x, y)
         draw.rectangle([cx - 5, cy - 5, cx + 5, cy + 5], outline=(37, 99, 235), width=2)
         snap.extend((round(cx, 3), round(cy, 3)))
