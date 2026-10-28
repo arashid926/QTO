@@ -6,7 +6,10 @@ Run with:  streamlit run app.py
 
 from __future__ import annotations
 
+import importlib
 import io
+import os
+import sys
 
 import pandas as pd
 import plotly.express as px
@@ -14,10 +17,42 @@ import plotly.graph_objects as go
 import streamlit as st
 from PIL import Image, ImageOps
 
+# Streamlit Cloud re-runs app.py after a git update but can keep old copies of the qto package in memory,
+# which then fail against the new app.py. Reload the package (dependencies first) whenever a source file
+# changed, and once when this process first runs this code.
+QTO_MODULES = ["qto", "qto.disciplines", "qto.geometry", "qto.assemblies", "qto.selftest", "qto.schedules", "qto.boq", "qto.rates",
+               "qto.measure", "qto.project", "qto.pdf_takeoff", "qto.dxf_takeoff", "qto.ifc_takeoff", "qto.mesh_takeoff",
+               "qto.samples", "qto.canvas"]
+
+
+@st.cache_resource(show_spinner=False)
+def _module_stamps() -> dict:
+    return {}
+
+
+def _reload_changed_modules() -> None:
+    stamps = _module_stamps()
+    first = not stamps
+    current = {}
+    for name in QTO_MODULES:
+        module = sys.modules.get(name)
+        path = getattr(module, "__file__", None)
+        if path and os.path.exists(path):
+            current[name] = os.path.getmtime(path)
+    if first or any(stamps.get(n) != t for n, t in current.items()):
+        for name in QTO_MODULES:
+            if name in sys.modules:
+                importlib.reload(sys.modules[name])
+    stamps.clear()
+    stamps.update(current)
+
+
+_reload_changed_modules()
+
 from qto import __version__, boq, dxf_takeoff, geometry, ifc_takeoff, measure, mesh_takeoff, pdf_takeoff, project, rates, samples, schedules, selftest
-from qto import assemblies as asm
-from qto import disciplines as dz
-from qto.canvas import measure_canvas
+from qto import assemblies as asm  # noqa: E402
+from qto import disciplines as dz  # noqa: E402
+from qto.canvas import measure_canvas  # noqa: E402
 
 st.set_page_config(page_title="QTO Studio", page_icon="📐", layout="wide", initial_sidebar_state="expanded")
 
