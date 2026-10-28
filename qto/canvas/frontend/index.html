@@ -55,6 +55,8 @@ let mouse = null, snapHit = null, selected = null;
 let pan = null, spaceDown = false, shiftDown = false, lastMode = null;
 let grid = null, gridCell = 24;
 let navTool = null, win = null, inkBox = null;  // navTool: null | "pan" | "window"; win: zoom-window drag box (screen px)
+let dim = null;      // last finished check-dimension {mode, pts}; kept on screen until cleared, never sent to Python
+let flash = null;    // last 'select similar' click, drawn briefly
 
 const TIPS = {
   count: "Click each item to count · Enter or ✔ Finish to save · Backspace undo · Esc cancel",
@@ -62,7 +64,11 @@ const TIPS = {
   area: "Click the corners · double-click or Enter to close the area · Shift = straight · Esc cancel",
   calibrate: "Click both ends of a dimension you know, e.g. a grid line or a dimensioned wall",
   select: "Click a measurement to select it · Delete removes it · drag to pan",
+  ruler: "Check a length: click points · double-click or Enter to finish · Esc clears · nothing is added to the take-off",
+  ruler_area: "Check an area: click the corners · double-click or Enter to close · Esc clears · nothing is added to the take-off",
+  pick: "Select similar: click one object (block, column, wall line, pad) — every matching object is measured for the active item",
 };
+const RULERS = ["ruler", "ruler_area"];
 
 window.addEventListener("message", (e) => {
   if (!e.data || e.data.type !== "streamlit:render") return;
@@ -76,7 +82,7 @@ window.addEventListener("message", (e) => {
     next.onload = () => { img = next; inkBox = inkExtents(next); resize(); fit(); draw(); };
     next.src = a.image;
   }
-  if (a.mode !== lastMode) { pts = []; lastMode = a.mode; }
+  if (a.mode !== lastMode) { pts = []; dim = null; lastMode = a.mode; }
   buildGrid(a.snap || []);
   selected = a.selected || null;
   tip.textContent = TIPS[a.mode] || "";
@@ -200,6 +206,21 @@ function readout() {
   const live = mouse && pts.length && args.mode !== "count" && args.mode !== "select" ? pts.concat([mouse]) : pts;
   const scale = m ? "" : " · <b>scale not set</b>";
   if (args.mode === "count") return `<b>${args.item || "Count"}</b> · ${pts.length} nr`;
+  if (args.mode === "pick") return `<b>Select similar</b> · ${args.item || "choose an item first"}`;
+  if (RULERS.includes(args.mode)) {
+    const p = pts.length ? live : dim ? dim.pts : [];
+    if (args.mode === "ruler") {
+      const len = polyLength(p);
+      let seg = "";
+      if (p.length > 1) {
+        const a = p[p.length - 2], b = p[p.length - 1];
+        seg = m ? ` · last segment ${fmt(dist(a, b) * m, "m")} (Δx ${fmt(Math.abs(b[0] - a[0]) * m, "m")}, Δy ${fmt(Math.abs(b[1] - a[1]) * m, "m")})` : "";
+      }
+      return `<b>📐 Check length</b> · ` + (m ? fmt(len * m, "m") : fmt(len, "px")) + seg + scale;
+    }
+    const ar = p.length > 2 ? polyArea(p) : 0, per = p.length > 1 ? polyLength(p.concat([p[0]])) : 0;
+    return `<b>⬛ Check area</b> · ` + (m ? fmt(ar * m * m, "m²") + " · perimeter " + fmt(per * m, "m") : fmt(ar, "px²")) + scale;
+  }
   if (args.mode === "line" || args.mode === "calibrate") {
     const len = polyLength(live);
     return `<b>${args.mode === "calibrate" ? "Calibrate" : args.item || "Length"}</b> · ` + (m ? fmt(len * m, "m") : fmt(len, "px")) + scale;
@@ -253,6 +274,39 @@ function drawShape(sh, active) {
   }
   ctx.restore();
 }
+// Extended outlines (blinding edge, excavation edge) sent by Python; display only.
+function drawGuide(g) {
+  if (!g.points || g.points.length < 2) return;
+  ctx.save();
+  ctx.setLineDash(g.dash || [6, 4]);
+  ctx.lineWidth = g.width || 1.6;
+  ctx.strokeStyle = g.color || "#0ea5e9";
+  path(g.points, g.closed !== false);
+  ctx.stroke();
+  ctx.restore();
+}
+// Check-dimension overlay: dimension line with a length tag on every segment.
+function drawRuler(p, closed) {
+  const m = args && args.m_per_px;
+  ctx.save();
+  ctx.strokeStyle = "#f59e0b"; ctx.fillStyle = "rgba(245,158,11,.15)"; ctx.lineWidth = 2.5; ctx.setLineDash([]);
+  path(p, closed);
+  if (closed && p.length > 2) ctx.fill();
+  ctx.stroke();
+  const ring = closed && p.length > 2 ? p.concat([p[0]]) : p;
+  ctx.font = "bold 12px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  for (let i = 1; i < ring.length; i++) {
+    const a = ring[i - 1], b = ring[i], len = dist(a, b);
+    if (len * view.s < 30) continue;
+    const [x, y] = toScreen([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+    const label = m ? (len * m).toFixed(3) + " m" : len.toFixed(0) + " px";
+    const w = ctx.measureText(label).width + 10;
+    ctx.fillStyle = "#0f172a"; ctx.fillRect(x - w / 2, y - 9, w, 18);
+    ctx.fillStyle = "#fde68a"; ctx.fillText(label, x, y + 0.5);
+  }
+  p.forEach((q) => { const [x, y] = toScreen(q); ctx.fillStyle = "#f59e0b"; ctx.fillRect(x - 3, y - 3, 6, 6); });
+  ctx.restore();
+}
 function draw() {
   if (!canvas.width) resize();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -261,11 +315,20 @@ function draw() {
     ctx.imageSmoothingEnabled = view.s < 1;
     ctx.drawImage(img, view.x, view.y, img.width * view.s, img.height * view.s);
   }
+  if (args) (args.guides || []).forEach(drawGuide);
   if (args) (args.shapes || []).forEach((sh) => drawShape(sh, false));
-  if (args && pts.length) {
+  if (args && RULERS.includes(args.mode)) {
+    const p = pts.length ? (mouse ? pts.concat([mouse]) : pts) : dim ? dim.pts : [];
+    if (p.length) drawRuler(p, args.mode === "ruler_area");
+  } else if (args && pts.length) {
     const mode = args.mode, c = mode === "calibrate" ? "#0ea5e9" : args.color || "#e11d48";
     const live = mouse && mode !== "count" ? pts.concat([mouse]) : pts;
     drawShape({ type: mode === "calibrate" ? "line" : mode, points: live, color: c, deduct: false }, true);
+  }
+  if (flash) {
+    const [x, y] = toScreen(flash);
+    ctx.save(); ctx.strokeStyle = "#f59e0b"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(x, y, 14, 0, Math.PI * 2); ctx.stroke(); ctx.restore();
   }
   if (snapHit && !navTool) {
     const [x, y] = toScreen(snapHit);
@@ -314,6 +377,10 @@ function dedupe(p) { return p.filter((q, i) => i === 0 || dist(q, p[i - 1]) > 0.
 function finish() {
   if (!args) return;
   const mode = args.mode;
+  if (RULERS.includes(mode)) {  // check dimensions stay on screen only
+    if (dedupe(pts).length > 1) dim = { mode, pts: dedupe(pts) };
+    pts = []; draw(); return;
+  }
   pts = mode === "count" ? pts : dedupe(pts);
   const need = { count: 1, line: 2, area: 3, calibrate: 2 }[mode];
   if (!need || pts.length < need) return;
@@ -340,7 +407,14 @@ canvas.addEventListener("mousedown", (e) => {
     if (id) setValue({ event: "select", shape: id, id: uid() });
     return;
   }
+  if (mode === "pick") {
+    const p0 = toImage(e.offsetX, e.offsetY);
+    flash = p0; draw();
+    setValue({ event: "pick", point: [+p0[0].toFixed(3), +p0[1].toFixed(3)], tol: 12 / view.s, id: uid() });
+    return;
+  }
   const p = cursorPoint(e.offsetX, e.offsetY);
+  if (RULERS.includes(mode) && !pts.length) dim = null;  // a new check starts
   pts.push(p);
   if (mode === "calibrate" && pts.length === 2) finish();
   draw();
@@ -371,12 +445,12 @@ window.addEventListener("mouseup", () => {
   draw();
 });
 canvas.addEventListener("mouseleave", () => { mouse = null; snapHit = null; draw(); });
-canvas.addEventListener("dblclick", () => { if (args && (args.mode === "line" || args.mode === "area")) finish(); });
+canvas.addEventListener("dblclick", () => { if (args && ["line", "area", ...RULERS].includes(args.mode)) finish(); });
 canvas.addEventListener("keydown", (e) => {
   if (e.key === "Shift") shiftDown = true;
   if (e.key === " ") { spaceDown = true; e.preventDefault(); }
   if (e.key === "Enter") finish();
-  if (e.key === "Escape") { if (navTool) setNav(navTool); else pts = []; draw(); }
+  if (e.key === "Escape") { if (navTool) setNav(navTool); else { pts = []; dim = null; flash = null; } draw(); }
   if (!e.ctrlKey && !e.metaKey && !e.altKey) {
     const k = e.key.toLowerCase();
     if (k === "p") setNav("pan");

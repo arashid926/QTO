@@ -95,8 +95,9 @@ TEMPLATES = {
     },
     "grade_beam": {
         "label": "Grade (tie) beam (clear length)", "trade": "Structural — substructure", "measure": "Length",
-        "params": {"b": 0.3, "h": 0.6},
-        "help": "Measure between the faces of neck columns or columns.",
+        "params": {"b": 0.3, "h": 0.6, "trench": 1.0},
+        "help": "Measure between the faces of neck columns or columns. Bottom = BGB level (or start level − h). "
+                "trench: 1 = include trench excavation, backfill and disposal; 0 = beam sits inside the footing excavation.",
     },
     "grade_slab": {
         "label": "Grade slab + polythene + granular fill", "trade": "Structural — substructure", "measure": "Area",
@@ -134,7 +135,7 @@ PARAM_LABELS = {
     "L": "Length L (m)", "W": "Width W (m)", "D": "Depth D (m)", "BOF": "Bottom of footing level BOF",
     "neck_b": "Neck column b (m, 0 = none)", "neck_h": "Neck column h (m)", "b": "Width b (m)", "h": "Depth h (m)",
     "TOF": "Top of footing level TOF", "t": "Thickness t (m)", "fill_t": "Granular fill thickness (m)",
-    "mesh": "Mesh reinforcement (1 = yes)", "bottom_level": "Excavation bottom level",
+    "mesh": "Mesh reinforcement (1 = yes)", "bottom_level": "Excavation bottom level", "trench": "Trench excavation (1 = yes)",
     "SSL_bottom": "SSL bottom", "SSL_top": "SSL top", "slab_t": "Slab thickness (m)",
     "column_area": "Column footprints to deduct (m²)", "beam_soffit_area": "Beam soffits to deduct (m²)",
     "thickness_mm": "Block thickness (mm)", "height": "Wall height (m, 0 = from levels)", "finish_faces": "Faces to plaster/paint",
@@ -161,6 +162,7 @@ class Derived:
     quantity: float
     formula: str
     section: str = S_CON
+    bill: bool = True  # False for reference dimensions (e.g. extended perimeters) shown but not billed
 
 
 @dataclass
@@ -222,6 +224,8 @@ def _foundation(name: str, count: float, footing_area: float, footing_perim: flo
         blind_area, blind_txt = count * bl_L * bl_W, f"{n(count)} × {n(bl_L)} × {n(bl_W)}"
         ex_area, ex_perim = count * ex_L * ex_W, count * 2 * (ex_L + ex_W)
         ex_txt = f"{n(count)} × {n(ex_L)} × {n(ex_W)}"
+        perims = (count * 2 * (L + W), count * 2 * (bl_L + bl_W), ex_perim,
+                  f"{n(count)} × 2 × ({n(L)} + {n(W)})", f"{n(count)} × 2 × ({n(bl_L)} + {n(bl_W)})", f"{n(count)} × 2 × ({n(ex_L)} + {n(ex_W)})")
     elif linear is not None:
         Wd = footing_area / linear if linear else 0.0
         bl_W = Wd + bo[0] + bo[1]
@@ -229,6 +233,8 @@ def _foundation(name: str, count: float, footing_area: float, footing_perim: flo
         blind_area, blind_txt = linear * bl_W, f"{n(linear)} × {n(bl_W)}"
         ex_area, ex_perim = linear * ex_W, 2 * linear
         ex_txt = f"{n(linear)} × {n(ex_W)}"
+        perims = (2 * linear + 2 * Wd, 2 * linear + 2 * bl_W, 2 * linear + 2 * ex_W,
+                  f"2 × {n(linear)} + 2 × {n(Wd)}", f"2 × {n(linear)} + 2 × {n(bl_W)}", f"2 × {n(linear)} + 2 × {n(ex_W)}")
     else:
         ob, oe = sum(bo) / 4, sum(eo) / 4
         blind_area = footing_area + footing_perim * ob + 4 * ob * ob * count
@@ -237,6 +243,9 @@ def _foundation(name: str, count: float, footing_area: float, footing_perim: flo
         ex_perim = base_P + 8 * oe * count
         blind_txt = f"({n(footing_area)} + {n(footing_perim)} × {n(ob)} + 4 × {n(ob)}² × {n(count)})"
         ex_txt = f"(offset outline area {n(ex_area)})"
+        bl_perim = footing_perim + 8 * ob * count
+        perims = (footing_perim, bl_perim, ex_perim, f"{n(footing_perim)}", f"{n(footing_perim)} + 8 × {n(ob)} × {n(count)}",
+                  f"{n(bl_perim if from_blinding else footing_perim)} + 8 × {n(oe)} × {n(count)}")
 
     batter = _g(g, "batter")
     volume_ex = ex_area * depth
@@ -260,6 +269,9 @@ def _foundation(name: str, count: float, footing_area: float, footing_perim: flo
         out.append(Derived("DEW", f"Dewatering to excavation for {name} (bottom {n(bottom)} below water table {n(levels['water_table'])})",
                            "item", 1.0, "excavation bottom below the water table", S_EXC))
     out.append(Derived("CMP", f"Trimming and compacting bottom of excavation for {name}", "m²", ex_area, f"{ex_txt}", S_EXC))
+    for code, label, value, txt in (("PFT", "footing face", perims[0], perims[3]), ("PBL", "blinding edge (extended)", perims[1], perims[4]),
+                                    ("PEX", "excavation edge (extended)", perims[2], perims[5])):
+        out.append(Derived(code, f"Reference: perimeter of {name} at {label}", "m", value, txt, S_EXC, bill=False))
     out.append(Derived("ATT", f"Anti-termite treatment to bottom of excavation for {name}", "m²", ex_area, f"{ex_txt}", S_GRD))
 
     refill_vol = 0.0
@@ -387,10 +399,38 @@ def compute(template: str, name: str, params: dict, shapes: list[Shape], levels:
             Derived("RBR", f"Reinforcement to {name}", "kg", vol * _g(g, "rebar_beam"), f"{n(vol)} × {n(_g(g, 'rebar_beam'))}"),
             Derived("BLD", f"Plain concrete blinding {n(t * 1000)} mm thick under {name}", "m³", length * bl_w * t, f"{n(length)} × {n(bl_w)} × {n(t)}"),
         ]
-        if _g(g, "waterproofing") in ("Sides", "Bottom + sides"):
-            lap = _g(g, "wp_lap")
+        wp, lap = _g(g, "waterproofing"), _g(g, "wp_lap")
+        if wp in ("Bottom", "Bottom + sides"):
+            out.append(Derived("WPB", f"Waterproofing membrane under {name} (incl. {n(lap * 100)}% laps)", "m²", length * b * (1 + lap),
+                               f"{n(length)} × {n(b)} × (1 + {n(lap)})", S_WP))
+        if wp in ("Sides", "Bottom + sides"):
             out.append(Derived("WPS", f"Waterproofing to sides of {name} (incl. {n(lap * 100)}% laps)", "m²", 2 * length * h * (1 + lap),
                                f"2 × {n(length)} × {n(h)} × (1 + {n(lap)})", S_WP))
+        out.append(Derived("PBL", f"Reference: length of {name} at blinding edges (both sides)", "m", 2 * length,
+                           f"2 × {n(length)}", S_CON, bill=False))
+        if p.get("trench", 1.0):
+            top = start_level(lv)
+            bottom = lv["BGB"] if lv.get("BGB") is not None else top - h
+            if bottom < top:
+                extra, bulk = _g(g, "extra_depth"), _g(g, "bulking")
+                depth = (top - bottom) + t + extra
+                ex_w = (bl_w if _g(g, "offset_from") == "Blinding edge" else b) + _g(g, "eo_left") + _g(g, "eo_right")
+                exc = length * ex_w * depth
+                buried = length * bl_w * t + length * b * min(h, top - bottom)
+                refill = length * ex_w * extra if extra > 0 and _g(g, "refill") != "None" else 0.0
+                buried += refill
+                backfill = max(exc - buried, 0.0)
+                out += [
+                    Derived("EXC", f"Trench excavation for {name}, {depth_band(depth)} (depth {n(depth)} m)", "m³", exc,
+                            f"{n(length)} × {n(ex_w)} × (({n(top)} − {n(bottom)}) + {n(t)}" + (f" + {n(extra)}" if extra else "") + ")", S_EXC),
+                    Derived("CMP", f"Trimming and compacting bottom of trench for {name}", "m²", length * ex_w, f"{n(length)} × {n(ex_w)}", S_EXC),
+                    Derived("BKF", f"Backfilling around {name} with excavated material", "m³", backfill,
+                            f"{n(exc)} − (blinding + beam below start level" + (" + refill" if refill else "") + f" = {n(buried)})", S_EXC),
+                    Derived("DSP", f"Disposal of surplus excavated material from {name} (bulking {n(bulk)})", "m³", (exc - backfill) * bulk,
+                            f"({n(exc)} − {n(backfill)}) × {n(bulk)}", S_EXC),
+                ]
+                if refill:
+                    out.append(Derived("RFL", f"{_g(g, 'refill')} to extra excavation below {name}", "m³", refill, f"{n(length)} × {n(ex_w)} × {n(extra)}", S_EXC))
         return out, issues
 
     if template == "grade_slab":

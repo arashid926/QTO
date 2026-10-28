@@ -9,18 +9,19 @@ import pandas as pd
 
 from . import boq, measure, rates
 
-FIELDS = {"p_name": "Project", "p_client": "Client", "p_location": "Location", "p_by": "Prepared by"}
+FIELDS = {"p_name": "Project", "p_client": "Client", "p_location": "Location", "p_by": "Prepared by", "p_standard": "Measurement standard"}
 CURRENCY_KEY = "p_currency"
 FORMAT = "qto-studio-project"
 
 
 def blank(name: str, client: str = "", location: str = "", prepared_by: str = "", currency: str = "USD",
-          first_building: str = "Building 1") -> dict:
+          first_building: str = "Building 1", standard: str = "RICS NRM2") -> dict:
     takeoff = measure.new_state()
     takeoff["buildings"][0]["name"] = first_building.strip() or "Building 1"
     return {
         "format": FORMAT, "version": 1,
-        "info": {"p_name": name.strip() or "New Project", "p_client": client, "p_location": location, "p_by": prepared_by},
+        "info": {"p_name": name.strip() or "New Project", "p_client": client, "p_location": location, "p_by": prepared_by,
+                 "p_standard": standard},
         "currency": currency, "boq": [], "rates": [],
         "takeoff": {k: takeoff[k] for k in measure.TAKEOFF_KEYS if k in takeoff},
     }
@@ -44,7 +45,7 @@ def restore(state, data: dict) -> None:
     if data.get("format") != FORMAT:
         raise ValueError("This is not a QTO Studio project file.")
     for key in FIELDS:
-        state[key] = data.get("info", {}).get(key, "")
+        state[key] = data.get("info", {}).get(key, "RICS NRM2" if key == "p_standard" else "")
     state[CURRENCY_KEY] = data.get("currency", "USD")
     lines = pd.DataFrame(data.get("boq") or [], columns=boq.COLUMNS)
     state["boq"] = boq.finalise(lines) if not lines.empty else boq.empty()
@@ -57,6 +58,36 @@ def restore(state, data: dict) -> None:
         state[key] = value
     for key in ("boq_ver", "rates_ver", "mt_ver"):
         state[key] = state.get(key, 0) + 1
+
+
+def merge(state, data: dict) -> dict:
+    """Bring another project into the open one: BOQ lines appended, rate library merged, take-off appended."""
+    if data.get("format") != FORMAT:
+        raise ValueError("This is not a QTO Studio project file.")
+    lines = pd.DataFrame(data.get("boq") or [], columns=boq.COLUMNS)
+    if not lines.empty:
+        state["boq"] = boq.finalise(pd.concat([state["boq"], lines], ignore_index=True))
+    library = pd.DataFrame(data.get("rates") or [], columns=rates.COLUMNS)
+    if not library.empty:
+        state["rates"] = rates.merge(state["rates"], library)
+    summary = measure.merge_takeoff(state["mt"], measure.from_dict(data.get("takeoff") or {}))
+    summary["boq_lines"] = len(lines)
+    for key in ("boq_ver", "rates_ver", "mt_ver"):
+        state[key] = state.get(key, 0) + 1
+    return summary
+
+
+def unique_name(name: str, taken) -> str:
+    candidate, n = name, 2
+    while candidate in taken:
+        candidate, n = f"{name} ({n})", n + 1
+    return candidate
+
+
+def renamed(data: dict, name: str) -> dict:
+    copy = json.loads(json.dumps(data, default=str))
+    copy["info"]["p_name"] = name
+    return copy
 
 
 def to_bytes(data: dict) -> bytes:

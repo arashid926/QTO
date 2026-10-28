@@ -263,7 +263,7 @@ def group_totals(state: dict) -> pd.DataFrame:
 
 
 LINE_COLUMNS = ["Ref", "Discipline", "Work Section", "Description", "Unit", "Quantity", "Rate", "Source", "Key"]
-DERIVED_COLUMNS = ["Ref", "Item", "Building", "Code", "Description", "Unit", "Quantity", "Formula", "Discipline", "Work Section", "Key"]
+DERIVED_COLUMNS = ["Ref", "Item", "Building", "Code", "Description", "Unit", "Quantity", "Formula", "Discipline", "Work Section", "Key", "Bill"]
 
 
 def shapes_for(state: dict, item: dict, building_id: int | None) -> tuple[list[asm.Shape], int]:
@@ -308,12 +308,12 @@ def derived_items(state: dict) -> tuple[pd.DataFrame, list[dict]]:
                     rows.append({"Ref": ref, "Item": item["ref"], "Building": building["name"], "Code": d.code,
                                  "Description": f"{d.description} — {building['name']}", "Unit": d.unit, "Quantity": d.quantity,
                                  "Formula": d.formula, "Discipline": item["discipline"], "Work Section": d.section,
-                                 "Key": f"{item['id']}|{d.code}"})
+                                 "Key": f"{item['id']}|{d.code}", "Bill": d.bill})
                 else:  # one combined line per derived item across buildings
                     row = merged.setdefault(d.code, {"Ref": "", "Item": item["ref"], "Building": "All", "Code": d.code,
                                                      "Description": d.description, "Unit": d.unit, "Quantity": 0.0, "Formula": [],
                                                      "Discipline": item["discipline"], "Work Section": d.section,
-                                                     "Key": f"{item['id']}|{d.code}"})
+                                                     "Key": f"{item['id']}|{d.code}", "Bill": d.bill})
                     row["Quantity"] += d.quantity
                     row["Formula"].append(f"{building['name']}: {d.formula}")
         for k, row in enumerate(merged.values(), start=1):
@@ -347,7 +347,7 @@ def boq_lines(state: dict) -> pd.DataFrame:
             })
     derived, _ = derived_items(state)
     for _, d in derived.iterrows():
-        if d["Quantity"] <= 0:
+        if d["Quantity"] <= 0 or not d["Bill"]:  # reference dimensions are shown in the workbook, not billed
             continue
         item_id, code = d["Key"].split("|")
         item = item_by_id(state, int(item_id))
@@ -371,6 +371,36 @@ def wall_schedules(state: dict) -> pd.DataFrame:
                 for row in asm.wall_schedule(params, shapes, {**asm.LEVELS, **building.get("levels", {})}, g, item.get("openings", [])):
                     rows.append({"Item": item["ref"], "Wall type": item["description"], "Building": building["name"], **row})
     return pd.DataFrame(rows)
+
+
+def merge_takeoff(target: dict, source: dict) -> dict:
+    """Append another take-off: buildings matched by name (added if new), items and measurements re-numbered."""
+    buildings = {b["name"]: b["id"] for b in target["buildings"]}
+    building_map = {}
+    for b in source.get("buildings", []):
+        if b["name"] not in buildings:
+            new = add_building(target, b["name"])
+            new["levels"] = {**asm.LEVELS, **b.get("levels", {})}
+            buildings[b["name"]] = new["id"]
+        building_map[b["id"]] = buildings[b["name"]]
+    item_map = {}
+    for item in source.get("items", []):
+        n = max((i["id"] for i in target["items"]), default=0) + 1
+        copy = json.loads(json.dumps(item))
+        copy.update({"id": n, "ref": f"TO-{n:03d}", "colour": PALETTE[(n - 1) % len(PALETTE)]})
+        target["items"].append(copy)
+        item_map[item["id"]] = n
+    for shape in source.get("shapes", []):
+        if shape["item_id"] not in item_map:
+            continue
+        copy = json.loads(json.dumps(shape))
+        copy.update({"id": uuid.uuid4().hex[:10], "item_id": item_map[shape["item_id"]],
+                     "building": building_map.get(shape.get("building", 1), target["buildings"][0]["id"])})
+        target["shapes"].append(copy)
+    for key, value in source.get("calibration", {}).items():
+        target["calibration"].setdefault(key, value)
+    return {"items": len(item_map), "shapes": sum(1 for s in source.get("shapes", []) if s["item_id"] in item_map),
+            "buildings": len(building_map)}
 
 
 def set_rate(state: dict, key: str, rate: float) -> None:

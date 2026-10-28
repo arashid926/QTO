@@ -63,6 +63,12 @@ def cases() -> list[dict]:
     t7, _ = asm.compute("grade_beam", "GB", {"b": 0.3, "h": 0.6}, [asm.Shape(length=5.6)], {}, asm.GLOBALS)
     check("7 Grade beam", "Concrete m³", 1.008, _q(t7, "CON"))
     check("7 Grade beam", "Side formwork m²", 6.720, _q(t7, "FWK"))
+    # bottom = NGL − h = −0.600; depth 0.600 + 0.075 = 0.675; trench width 0.3 + 0.2 blinding + 0.6 working space = 1.1
+    check("7 Grade beam", "Waterproofing under beam m²", 1.848, _q(t7, "WPB"))
+    check("7 Grade beam", "Trench excavation m³", 4.158, _q(t7, "EXC"))
+    check("7 Grade beam", "Backfill m³", 2.940, _q(t7, "BKF"))
+    check(t1, "Extended perimeter at blinding edge m", 35.200, _q(base, "PBL"))
+    check(t1, "Extended perimeter at excavation edge m", 44.800, _q(base, "PEX"))
 
     t8, _ = asm.compute("beam", "B1", {"b": 0.3, "h": 0.6, "slab_t": 0.2}, [asm.Shape(length=6.0)], {}, asm.GLOBALS)
     check("8 Beam under slab", "Concrete m³", 0.720, _q(t8, "CON"))

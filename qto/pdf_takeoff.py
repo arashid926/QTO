@@ -200,6 +200,28 @@ def snap_points(data: bytes, page_no: int, limit: int = 40_000) -> list[tuple[fl
     return out
 
 
+def drawing_objects(data: bytes, page_no: int, limit: int = 60_000) -> list[dict]:
+    """Every vector path on a page, in page points from the top-left, for 'select similar' (same pen and size)."""
+    from . import geometry
+
+    objects = []
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        page = pdf.pages[page_no]
+        bx0, btop = page.bbox[0], page.bbox[1]
+        for colour, width, pts, closed in _objects(page):
+            pts = [(x - bx0, y - btop) for x, y in pts]
+            if closed and len(pts) > 3 and math.dist(pts[0], pts[-1]) < 0.5:
+                pts = pts[:-1]
+            if len(pts) < 2:
+                continue
+            objects.append({"kind": "path", "key": f"pen:{colour}|{width}", "label": f"pen {colour} {width} pt", "pts": pts,
+                            "center": geometry.centroid(pts), "closed": closed,
+                            "area": geometry.area(pts) if closed else 0.0, "perimeter": geometry.perimeter(pts, closed)})
+            if len(objects) >= limit:
+                break
+    return objects
+
+
 def render_for_measure(data: bytes, page_no: int, dpi: int = 110):
     """(image, pixels per PDF point) for on-screen measuring; very large sheets get a lower resolution."""
     with pdfplumber.open(io.BytesIO(data)) as pdf:

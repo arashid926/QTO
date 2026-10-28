@@ -234,20 +234,12 @@ def render_image(result: DxfResult, max_side: int = 4000, margin: int = 40):
     """
     from PIL import Image, ImageDraw
 
-    xs = [x for _, px, _ in result.preview for x in px if x is not None] + result.markers["X"].tolist()
-    ys = [y for _, _, py in result.preview for y in py if y is not None] + result.markers["Y"].tolist()
-    if not xs:
+    frame = _frame(result, max_side, margin)
+    if frame is None:
         return Image.new("RGB", (800, 600), "white"), 1.0, []
-    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
-    span = max(x1 - x0, y1 - y0, 1e-6)
-    px_per_m = (max_side - 2 * margin) / span
-    width = int((x1 - x0) * px_per_m) + 2 * margin
-    height = int((y1 - y0) * px_per_m) + 2 * margin
+    to_px, px_per_m, width, height = frame
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
-
-    def to_px(x, y):
-        return (margin + (x - x0) * px_per_m, margin + (y1 - y) * px_per_m)  # DXF y points up, image y down
 
     snap, seen = [], set()
     for _layer, px, py in result.preview:
@@ -269,6 +261,50 @@ def render_image(result: DxfResult, max_side: int = 4000, margin: int = 40):
         draw.rectangle([cx - 5, cy - 5, cx + 5, cy + 5], outline=(37, 99, 235), width=2)
         snap.extend((round(cx, 3), round(cy, 3)))
     return image, 1.0 / px_per_m, snap
+
+
+def _frame(result: DxfResult, max_side: int = 4000, margin: int = 40):
+    """(to_px, px_per_m, width, height) of the measuring image; shared by the renderer and object picking."""
+    xs = [x for _, px, _ in result.preview for x in px if x is not None] + result.markers["X"].tolist()
+    ys = [y for _, _, py in result.preview for y in py if y is not None] + result.markers["Y"].tolist()
+    if not xs:
+        return None
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    px_per_m = (max_side - 2 * margin) / max(x1 - x0, y1 - y0, 1e-6)
+
+    def to_px(x, y):
+        return (margin + (x - x0) * px_per_m, margin + (y1 - y) * px_per_m)  # DXF y points up, image y down
+
+    return to_px, px_per_m, int((x1 - x0) * px_per_m) + 2 * margin, int((y1 - y0) * px_per_m) + 2 * margin
+
+
+def drawing_objects(result: DxfResult, max_side: int = 4000, margin: int = 40) -> list[dict]:
+    """Every block reference and every drawn path, in measuring-image pixels, for 'select similar'."""
+    from . import geometry
+
+    frame = _frame(result, max_side, margin)
+    if frame is None:
+        return []
+    to_px = frame[0]
+    objects = []
+    for block, layer, x, y in zip(result.markers["Block"], result.markers["Layer"], result.markers["X"], result.markers["Y"]):
+        c = to_px(x, y)
+        objects.append({"kind": "insert", "key": f"block:{block}", "label": f"block {block}", "pts": [c], "center": c,
+                        "closed": False, "area": 0.0, "perimeter": 0.0})
+    for layer, px, py in result.preview:
+        run = []
+        for x, y in list(zip(px, py)) + [(None, None)]:
+            if x is not None:
+                run.append(to_px(x, y))
+                continue
+            if len(run) > 1:
+                closed = len(run) > 3 and math.dist(run[0], run[-1]) < 0.5
+                pts = run[:-1] if closed else run
+                objects.append({"kind": "path", "key": f"layer:{layer}", "label": f"layer {layer}", "pts": pts,
+                                "center": geometry.centroid(pts), "closed": closed,
+                                "area": geometry.area(pts) if closed else 0.0, "perimeter": geometry.perimeter(pts, closed)})
+            run = []
+    return objects
 
 
 def count_tags(texts: pd.DataFrame, tags: list[str]) -> pd.DataFrame:
