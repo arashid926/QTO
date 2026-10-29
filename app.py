@@ -1,6 +1,6 @@
 """QTO Studio — professional quantity take-off from drawings, models and schedules.
 
-Layout: left rail of views · ribbon tabs (File, Home, Drawings, Dimension, Workbook) · large working area.
+Layout: title row · menu (File, Home, Drawings, Dimension, Workbook, Views) with quick tools on the right · large working area.
 Run with:  streamlit run app.py
 """
 
@@ -59,7 +59,7 @@ from qto import assemblies as asm  # noqa: E402
 from qto import disciplines as dz  # noqa: E402
 from qto.canvas import measure_canvas  # noqa: E402
 
-st.set_page_config(page_title="QTO Studio", page_icon="📐", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="QTO Studio", page_icon="📐", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown(
     """
@@ -85,8 +85,13 @@ div[data-testid="stTabs"] div[data-testid="stPopover"] button {padding: .2rem .3
 /* icon tools: square, centred; the name shows in the tooltip */
 .st-key-qto_ribbon div[data-testid="stButton"] button, .st-key-qto_ribbon div[data-testid="stDownloadButton"] button,
 .st-key-qto_ribbon div[data-testid="stPopover"] button, .st-key-qto_bar div[data-testid="stButton"] button
-  {min-width: 2.1rem; min-height: 2.1rem !important; justify-content: center;}
-.st-key-qto_ribbon div[data-testid="stToggle"] label p {font-size: 1.05rem !important;}
+  {min-width: 2.3rem; min-height: 2.3rem !important; height: 2.3rem; padding: 0 .25rem !important; justify-content: center;}
+.st-key-qto_ribbon button p, .st-key-qto_bar button p {font-size: 1.2rem !important; line-height: 1 !important;}
+.st-key-qto_ribbon div[data-testid="stToggle"] label p {font-size: 1.2rem !important;}
+/* group titles (DRAWING, VIEW…): keep their line; the auto-width groups otherwise squash them to nothing */
+.st-key-qto_ribbon div:has(> [data-testid="stCaptionContainer"]) {height: auto !important; min-height: .8rem;}
+.st-key-qto_ribbon div[data-testid="stCaptionContainer"], .st-key-qto_ribbon div[data-testid="stCaptionContainer"] p
+  {white-space: nowrap; overflow: visible; width: max-content; max-width: none; color: #64748b; font-weight: 600;}
 .st-key-qto_ribbon div[data-testid="stVerticalBlockBorderWrapper"] {padding: .15rem .35rem .3rem; border-radius: 6px;}
 .st-key-qto_ribbon div[data-testid="stCaptionContainer"] p {font-size: .6rem; letter-spacing: .06em; margin: 0; line-height: 1;}
 .st-key-qto_ribbon div[data-baseweb="select"] > div, .st-key-qto_ribbon input {min-height: 1.75rem; font-size: .75rem;}
@@ -104,14 +109,28 @@ div[data-testid="stTabs"] div[data-testid="stPopover"] button {padding: .2rem .3
 .st-key-rb_home div[data-testid="stVerticalBlockBorderWrapper"] {padding: .15rem .25rem .25rem !important;}
 .st-key-rb_home button div[data-testid="stMarkdownContainer"], .st-key-rb_file button div[data-testid="stMarkdownContainer"]
   {overflow: visible; text-overflow: clip; max-width: none;}
-/* Streamlit's own top bar: slim and see-through so it does not cover the title bar */
-header[data-testid="stHeader"] {height: 2.1rem; min-height: 2.1rem; background: transparent;}
-.block-container {padding-top: 2.2rem;}
-.titlebar {white-space: nowrap; overflow: hidden; padding: .3rem .9rem; margin-bottom: 0;}
+/* maximum work space: no Streamlit top bar or side rail (the views are in the Views menu), tight page edges */
+header[data-testid="stHeader"], section[data-testid="stSidebar"], div[data-testid="stSidebarCollapsedControl"] {display: none;}
+.block-container, .stMainBlockContainer {padding: .25rem .6rem .4rem !important;}
+.stMainBlockContainer > div[data-testid="stVerticalBlock"] {gap: .3rem;}
+.titlebar {white-space: nowrap; overflow: hidden; padding: .15rem .8rem; margin: 0; font-size: .85rem; gap: .7rem;}
 .titlebar span {overflow: hidden; text-overflow: ellipsis; min-width: 0;}
-.st-key-qto_bar div[data-testid="stButton"] button {padding: 0 .3rem;}
-.st-key-qto_bar div[data-testid="stButton"] button p {font-size: 1.05rem; line-height: 1;}
-.statusbar {background: #0f172a; color: #e2e8f0; font-size: .8rem; padding: .3rem .8rem; border-radius: 8px; margin-top: .25rem;}
+.titlebar span + span::before {content: "· "; opacity: .6;}
+.titlebar .err {color: #fecaca; font-weight: 700;}
+.st-key-qto_bar div[data-testid="stHorizontalBlock"] {gap: .2rem;}
+/* menu row: tabs on the left, quick tools (and window buttons when maximised) on the right of the same line */
+.st-key-qto_ribbon {position: relative; gap: 0 !important;}
+.st-key-qto_ribbon > div:has(> .st-key-qto_quick) {position: absolute; top: 0; right: 0; z-index: 5; width: auto !important;}
+.st-key-qto_quick div[data-testid="stHorizontalBlock"] {flex-wrap: nowrap; gap: .15rem !important;}
+.st-key-qto_quick div[data-testid="stColumn"], .st-key-qto_quick div[data-testid="column"]
+  {flex: 0 0 auto !important; width: auto !important; min-width: 0 !important;}
+.st-key-qto_ribbon [role="tablist"] {min-height: 2.4rem; align-items: flex-end;}
+.st-key-qto_ribbon [data-baseweb="tab-panel"], .st-key-qto_ribbon [role="tabpanel"] {padding: .2rem 0 0 !important;}
+.st-key-qto_ribbon [data-baseweb="tab-highlight"], .st-key-qto_ribbon [data-baseweb="tab-border"] {margin: 0;}
+.st-key-rb_views div[data-testid="stHorizontalBlock"] {flex-wrap: wrap; gap: .15rem !important;}
+.st-key-rb_views div[data-testid="stColumn"], .st-key-rb_views div[data-testid="column"]
+  {flex: 0 0 auto !important; width: auto !important; min-width: 0 !important;}
+.statusbar {background: #0f172a; color: #e2e8f0; font-size: .75rem; padding: .15rem .8rem; border-radius: 6px; margin-top: 0;}
 .statusbar b {color: #7dd3fc;}
 div[data-testid="stMetric"] {background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: .6rem .9rem;}
 .card {background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 1rem 1.2rem; height: 100%;}
@@ -192,7 +211,7 @@ def qfmt() -> str:
 
 
 def go_to(view: str):
-    """Button callback: switch the left-rail view (runs before the widgets are drawn)."""
+    """Button callback: switch the work view (runs before the widgets are drawn)."""
     ss.nav = view
 
 
@@ -1517,6 +1536,27 @@ def ribbon_home(issue_count: int) -> None:
              type="primary" if issue_count else "secondary", on_click=go_to, args=(NAV[3],))
 
 
+def ribbon_views() -> None:
+    """The work views (formerly the left rail) as icon tools; the open view is highlighted."""
+    c = tool_group("VIEWS", len(NAV))
+    for col, view in zip(c, NAV):
+        icon, _, name = view.partition(" ")
+        tool(col, icon, name, f"nav_{name}", VIEW_TIPS.get(view, ""), type="primary" if ss.nav == view else "secondary",
+             on_click=go_to, args=(view,))
+    st.caption(f"v{__version__} · {ss.p_standard}" + (f" · 👤 {ss.account['name']}" if ss.account.get("name") else "")
+               + " · " + " · ".join(f"🏢 {b['name']} NGL {b['levels']['NGL']:+.3f}" for b in ss.mt["buildings"])
+               + " · The free server keeps nothing: File → 💾 Save before closing.")
+
+
+VIEW_TIPS = {
+    NAV[0]: "Measure on the drawing", NAV[1]: "Priced take-off lines and the dimension sheet",
+    NAV[2]: "Drawings, layers and dimension groups with highlighting", NAV[3]: "Errors, warnings and the self-test",
+    NAV[4]: "Automatic take-off from DXF layers or PDF linework", NAV[5]: "IFC and mesh model take-off",
+    NAV[6]: "Upload discipline schedules", NAV[7]: "Your unit rates", NAV[8]: "Bill of Quantities and Excel export",
+    NAV[9]: "Charts and project summary",
+}
+
+
 def ribbon_drawings() -> None:
     mt = ss.mt
     c = st.columns([0.5, 2.4, 0.8, 1, 0.45, 0.45, 0.6], vertical_alignment="center")
@@ -2535,51 +2575,52 @@ def view_dashboard() -> None:
     right.plotly_chart(fig.update_layout(showlegend=False, margin=CHART_MARGIN, height=420), key="disc_bar")
 
 
-# ------------------------------------------------------------------ layout: left rail, title bar, ribbon, working area
+# ------------------------------------------------------------------ layout: title row, menu and ribbon, working area
 
 issues = measure.check_project(ss.mt)
 issue_count = int((issues["Severity"] == "Error").sum()) if not issues.empty else 0
 
-with st.sidebar:
-    st.markdown("## 📐 QTO Studio")
-    st.caption(f"v{__version__} · {ss.p_standard}" + (f" · 👤 {ss.account['name']}" if ss.account.get("name") else ""))
-    if "project_msg" in ss:
-        st.toast(ss.pop("project_msg"), icon="📁")
-    st.radio("View", NAV, key="nav", label_visibility="collapsed")
-    st.divider()
-    st.markdown(f"**📁 {ss.p_name}**")
-    for b in ss.mt["buildings"]:
-        lv = b["levels"]
-        st.caption(f"🏢 {b['name']} · NGL {lv['NGL']:+.3f}")
-    st.caption(f"{len(ss.mt['items'])} items · {len(ss.mt['shapes'])} measurements · {len(ss.boq)} BOQ lines")
-    if issue_count:
-        st.error(f"{issue_count} error(s) — see ✅ Project Check")
-    st.caption("The free server keeps nothing: File → 💾 Save before closing.")
+if "project_msg" in ss:
+    st.toast(ss.pop("project_msg"), icon="📁")
 
 doc_name, page_no = current_drawing()
-maximised = ss.ui_max and ss.nav in (NAV[0], NAV[2])
-if maximised:  # drawing gets the whole window: no side rail, no ribbon, slim margins
-    st.markdown("<style>section[data-testid='stSidebar'], div[data-testid='stSidebarCollapsedControl'] {display: none;}"
-                ".block-container {padding: 2.2rem .5rem .3rem;} .titlebar {padding: .2rem .8rem; margin-bottom: .15rem;}</style>",
-                unsafe_allow_html=True)
-if ss.ribbon_min or maximised:  # the ribbon is still drawn (its settings stay alive), just hidden
-    st.markdown("<style>.st-key-qto_ribbon {display: none;}</style>", unsafe_allow_html=True)
-with st.container(key="qto_bar"):
-    on_drawing = ss.nav in (NAV[0], NAV[2])
-    t, quick, b1, b2 = st.columns([5.6, 6.8, 0.55, 0.55] if on_drawing else [12.3, 0.1, 0.55, 0.55], vertical_alignment="center")
-    if on_drawing:  # quick-access drawing tools: always in reach, also with the ribbon minimised or the drawing maximised
-        for col, (icon, name, tip) in zip(quick.columns(len(QUICK_TOOLS)), QUICK_TOOLS):
-            col.button(icon, key=f"qa_{name}", use_container_width=True, help=tip, on_click=view_cmd, args=(name,))
-    t.markdown(f"<div class='titlebar'><b>📐 QTO Studio</b><span>{ss.p_name}</span><span>·</span><span>{ss.nav}</span>"
-               f"<span>·</span><span>{doc_name or 'no drawing'}{f' p{page_no + 1}' if doc_name else ''}</span></div>", unsafe_allow_html=True)
-    tool(b1, "▾" if ss.ribbon_min else "▴", "Show ribbon" if ss.ribbon_min else "Minimise ribbon", "bar_ribbon",
-         "Tools stay as you left them", disabled=maximised, on_click=toggle_ui, args=("ribbon_min",))
+on_drawing = ss.nav in (NAV[0], NAV[2])
+maximised = ss.ui_max and on_drawing
+if ss.ribbon_min or maximised:  # only the menu row stays; the ribbon panels are still drawn (settings stay alive), just hidden
+    st.markdown("<style>.st-key-qto_ribbon [role='tabpanel'] {display: none;}</style>", unsafe_allow_html=True)
+if maximised:  # the drawing takes the window: the title row goes too (its two buttons move to the menu row)
+    st.markdown("<style>.st-key-qto_bar {display: none;}</style>", unsafe_allow_html=True)
+
+
+def window_buttons(b1, b2) -> None:
+    """The two window buttons: minimise the ribbon, maximise the drawing."""
+    tool(b1, "🔽" if ss.ribbon_min else "🔼", "Show ribbon" if ss.ribbon_min else "Minimise ribbon", "bar_ribbon",
+         "Menu row and quick tools stay", disabled=maximised, on_click=toggle_ui, args=("ribbon_min",))
     tool(b2, "🗗" if maximised else "🔲", "Restore" if maximised else "Maximise drawing", "bar_max",
-         "Side rail and ribbon come back" if maximised else "Drawing fills the window; measuring keys still work (Enter, Esc, +/−)",
+         "Title row and ribbon come back" if maximised else "Drawing fills the window; measuring keys still work (Enter, Esc, +/−)",
          on_click=toggle_ui, args=("ui_max",))
 
+
+with st.container(key="qto_bar"):  # title row: app name and project on the left, the two window buttons on the right
+    t, b1, b2 = st.columns([20, 1, 1], vertical_alignment="center")
+    errors = f"<span class='err'>⚠ {issue_count} error(s)</span>" if issue_count else ""
+    t.markdown(f"<div class='titlebar'><b>📐 QTO Studio</b><span>📁 {ss.p_name}</span><span>{ss.nav}</span>"
+               f"<span>{doc_name or 'no drawing'}{f' p{page_no + 1}' if doc_name else ''}</span>"
+               f"<span>{len(ss.mt['items'])} groups · {len(ss.mt['shapes'])} measurements · {len(ss.boq)} BOQ lines</span>{errors}</div>",
+               unsafe_allow_html=True)
+    if not maximised:
+        window_buttons(b1, b2)
+
 with st.container(key="qto_ribbon"):
-    r_file, r_home, r_draw, r_dim, r_wb = st.tabs(["File", "Home", "Drawings", "Dimension", "Workbook"])
+    with st.container(key="qto_quick"):  # right end of the menu row: quick drawing tools (+ window buttons when maximised)
+        n_quick = (len(QUICK_TOOLS) if on_drawing else 0) + (2 if maximised else 0)
+        cols = st.columns(n_quick) if n_quick else []
+        if on_drawing:
+            for col, (icon, name, tip) in zip(cols, QUICK_TOOLS):
+                col.button(icon, key=f"qa_{name}", use_container_width=True, help=tip, on_click=view_cmd, args=(name,))
+        if maximised:
+            window_buttons(cols[-2], cols[-1])
+    r_file, r_home, r_draw, r_dim, r_wb, r_views = st.tabs(["File", "Home", "Drawings", "Dimension", "Workbook", "Views"])
     with r_file, st.container(key="rb_file"):
         ribbon_file()
     with r_home, st.container(key="rb_home"):
@@ -2590,6 +2631,8 @@ with st.container(key="qto_ribbon"):
         ribbon_dimension()
     with r_wb:
         ribbon_workbook()
+    with r_views, st.container(key="rb_views"):
+        ribbon_views()
 
 view = ss.nav
 if view == NAV[0]:
