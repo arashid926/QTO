@@ -211,6 +211,14 @@ if "pending_project" in ss:
         ss["project_msg"] = f"Could not open the project: {exc}"
 
 
+# Building switches requested by dialogs are applied before anything is drawn, so the title row,
+# the drawing list and the drawing all show the same building.
+if "pending_building" in ss:
+    ss.mt_building = ss.pop("pending_building")
+if ss.get("pending_doc") in ss.files:  # a drawing opened from a dialog: show its building
+    ss.mt_building = measure.drawing_building(ss.mt, ss.pending_doc)
+
+
 def qfmt() -> str:
     """Quantity display format from ⚙️ Options (2 or 3 decimals)."""
     return f"%.{int(ss.opts.get('decimals', 3))}f"
@@ -1607,10 +1615,6 @@ VIEW_TIPS = {
 def ribbon_drawings() -> None:
     mt = ss.mt
     c = st.columns([1.6, 0.45, 0.5, 2.4, 0.8, 1, 0.45, 0.45, 0.6], vertical_alignment="center")
-    if "pending_building" in ss:
-        ss.mt_building = ss.pop("pending_building")
-    if ss.get("pending_doc") in ss.files:  # a drawing opened from a dialog: show its building
-        ss.mt_building = measure.drawing_building(mt, ss.pending_doc)
     bids = [bld["id"] for bld in mt["buildings"]]
     if ss.get("mt_building") not in bids:
         ss.mt_building = bids[0]
