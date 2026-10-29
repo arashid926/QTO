@@ -22,7 +22,7 @@ def test_merge_projects():
     item = measure.add_assembly_item(other["mt"], "grade_beam", "GB1")
     measure.add_shape(other["mt"], item["id"], "plan.dxf", 0, [[0, 0], [10, 0]], building=block["id"])
     summary = project.merge(target, project.snapshot(other))
-    assert summary == {"items": 2, "shapes": 2, "buildings": 2, "boq_lines": 1}
+    assert summary == {"items": 2, "shapes": 2, "buildings": 2, "boq_lines": 1, "drawings": 0}
     mt = target["mt"]
     assert [i["ref"] for i in mt["items"]] == ["TO-001", "TO-002", "TO-003"]  # re-numbered after the existing item
     assert [b["name"] for b in mt["buildings"]] == ["Villa A", "Block B"]  # same-name building reused, new one added
