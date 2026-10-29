@@ -59,11 +59,51 @@ def new_state() -> dict:
         "buildings": [{"id": 1, "code": "B01", "name": "Building 1", "levels": dict(asm.LEVELS)}],
         "split_buildings": True,  # one BOQ line per item per building (when there is more than one building)
         "globals": dict(asm.GLOBALS),  # project defaults for blinding, offsets, laps, rebar ratios…
+        "drawings": {},  # drawing name → {"building": id}: each building has its own drawings
     }
 
 
 def page_key(doc: str, page: int) -> str:
     return f"{doc}|{page}"
+
+
+# ---------------------------------------------------------------- drawings belong to a building
+
+def drawing_building(state: dict, name: str) -> int:
+    """The building a drawing belongs to (a drawing not yet assigned goes to the first building)."""
+    ids = [b["id"] for b in state["buildings"]]
+    entry = state.setdefault("drawings", {}).setdefault(name, {"building": ids[0]})
+    if entry.get("building") not in ids:
+        entry["building"] = ids[0]
+    return entry["building"]
+
+
+def assign_drawing(state: dict, name: str, building_id: int) -> None:
+    state.setdefault("drawings", {})[name] = {"building": building_id}
+
+
+def drawings_for(state: dict, names, building_id: int) -> list[str]:
+    """Only the drawings of one building, in their upload order."""
+    return [n for n in names if drawing_building(state, n) == building_id]
+
+
+def rename_drawing(state: dict, old: str, new: str) -> None:
+    """Rename a drawing everywhere: its building link, its measurements and its scale."""
+    drawings = state.setdefault("drawings", {})
+    if old in drawings:
+        drawings[new] = drawings.pop(old)
+    for shape in state["shapes"]:
+        if shape["doc"] == old:
+            shape["doc"] = new
+    for key in [k for k in state["calibration"] if k.rsplit("|", 1)[0] == old]:
+        state["calibration"][f"{new}|{key.rsplit('|', 1)[1]}"] = state["calibration"].pop(key)
+
+
+def remove_drawing(state: dict, name: str) -> None:
+    """Forget a drawing's building link and scale; its measurements stay in the take-off."""
+    state.setdefault("drawings", {}).pop(name, None)
+    for key in [k for k in state["calibration"] if k.rsplit("|", 1)[0] == name]:
+        state["calibration"].pop(key)
 
 
 # ---------------------------------------------------------------- buildings
@@ -85,6 +125,9 @@ def delete_building(state: dict, building_id: int) -> bool:
     if len(state["buildings"]) <= 1 or any(s.get("building") == building_id for s in state["shapes"]):
         return False
     state["buildings"] = [b for b in state["buildings"] if b["id"] != building_id]
+    for entry in state.setdefault("drawings", {}).values():  # its drawings move to the first building
+        if entry.get("building") == building_id:
+            entry["building"] = state["buildings"][0]["id"]
     return True
 
 
@@ -390,8 +433,10 @@ def wall_schedules(state: dict) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def merge_takeoff(target: dict, source: dict) -> dict:
-    """Append another take-off: buildings matched by name (added if new), items and measurements re-numbered."""
+def merge_takeoff(target: dict, source: dict, doc_map: dict | None = None) -> dict:
+    """Append another take-off: buildings matched by name (added if new), items and measurements re-numbered.
+    doc_map renames drawings whose name clashed with a drawing already in the target."""
+    doc_map = doc_map or {}
     buildings = {b["name"]: b["id"] for b in target["buildings"]}
     building_map = {}
     for b in source.get("buildings", []):
@@ -411,11 +456,15 @@ def merge_takeoff(target: dict, source: dict) -> dict:
         if shape["item_id"] not in item_map:
             continue
         copy = json.loads(json.dumps(shape))
-        copy.update({"id": uuid.uuid4().hex[:10], "item_id": item_map[shape["item_id"]],
+        copy.update({"id": uuid.uuid4().hex[:10], "item_id": item_map[shape["item_id"]], "doc": doc_map.get(shape["doc"], shape["doc"]),
                      "building": building_map.get(shape.get("building", 1), target["buildings"][0]["id"])})
         target["shapes"].append(copy)
     for key, value in source.get("calibration", {}).items():
-        target["calibration"].setdefault(key, value)
+        doc, _, page = key.rpartition("|")
+        target["calibration"].setdefault(f"{doc_map.get(doc, doc)}|{page}", value)
+    for name, entry in source.get("drawings", {}).items():
+        target.setdefault("drawings", {}).setdefault(
+            doc_map.get(name, name), {"building": building_map.get(entry.get("building"), target["buildings"][0]["id"])})
     return {"items": len(item_map), "shapes": sum(1 for s in source.get("shapes", []) if s["item_id"] in item_map),
             "buildings": len(building_map)}
 
@@ -478,6 +527,10 @@ def upgrade(state: dict) -> dict:
     for shape in state.setdefault("shapes", []):
         shape.setdefault("building", state["buildings"][0]["id"])
         shape.setdefault("level", "")
+    drawings = state.setdefault("drawings", {})
+    for shape in state["shapes"]:  # older take-offs: a drawing belongs to the building it was measured for
+        if shape["doc"] != MANUAL_DOC and shape["doc"] not in drawings:
+            drawings[shape["doc"]] = {"building": shape["building"]}
     return state
 
 
@@ -486,7 +539,7 @@ def to_json(state: dict) -> bytes:
     return json.dumps({"format": "qto-studio-takeoff", "version": 3, **data}, indent=1).encode("utf-8")
 
 
-TAKEOFF_KEYS = ("items", "shapes", "calibration", "buildings", "split_buildings", "globals")
+TAKEOFF_KEYS = ("items", "shapes", "calibration", "buildings", "split_buildings", "globals", "drawings")
 
 
 def from_json(raw: bytes) -> dict:
@@ -505,6 +558,7 @@ def from_dict(data: dict) -> dict:
         state["buildings"] = list(data["buildings"])
     state["split_buildings"] = bool(data.get("split_buildings", True))
     state["globals"] = {**asm.GLOBALS, **data.get("globals", {})}
+    state["drawings"] = {k: dict(v) for k, v in data.get("drawings", {}).items()}
     return upgrade(state)
 
 

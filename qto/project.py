@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import uuid
 from datetime import datetime
 
 import pandas as pd
@@ -12,6 +14,17 @@ from . import boq, measure, rates
 FIELDS = {"p_name": "Project", "p_client": "Client", "p_location": "Location", "p_by": "Prepared by", "p_standard": "Measurement standard"}
 CURRENCY_KEY = "p_currency"
 FORMAT = "qto-studio-project"
+# Screen state that belongs to the open project; cleared when another project is opened so nothing carries over.
+VIEW_KEYS = ("mt_doc", "mt_active", "mt_building", "mt_level", "mt_loc", "canvas_cmd", "model_pick",
+             "pending_doc", "pending_active", "pending_building", "pending_model")
+
+
+def _pack(files: dict) -> dict:
+    return {name: base64.b64encode(data).decode("ascii") for name, data in (files or {}).items()}
+
+
+def _unpack(files: dict) -> dict:
+    return {name: base64.b64decode(text) for name, text in (files or {}).items()}
 
 
 def blank(name: str, client: str = "", location: str = "", prepared_by: str = "", currency: str = "USD",
@@ -19,25 +32,32 @@ def blank(name: str, client: str = "", location: str = "", prepared_by: str = ""
     takeoff = measure.new_state()
     takeoff["buildings"][0]["name"] = first_building.strip() or "Building 1"
     return {
-        "format": FORMAT, "version": 1,
+        "format": FORMAT, "version": 2, "id": uuid.uuid4().hex,
         "info": {"p_name": name.strip() or "New Project", "p_client": client, "p_location": location, "p_by": prepared_by,
                  "p_standard": standard},
         "currency": currency, "boq": [], "rates": [],
         "takeoff": {k: takeoff[k] for k in measure.TAKEOFF_KEYS if k in takeoff},
+        "files": {}, "models": {}, "hidden_layers": {},
     }
 
 
 def snapshot(state) -> dict:
-    """Everything belonging to the open project, as plain JSON-ready data."""
+    """Everything belonging to the open project, as plain JSON-ready data: details, BOQ, rates, take-off,
+    libraries, and its own drawings and 3D models (base64), so projects never share or mix data."""
     takeoff = state["mt"]
+    if not state.get("p_id"):
+        state["p_id"] = uuid.uuid4().hex
     return {
-        "format": FORMAT, "version": 1, "saved": datetime.now().isoformat(timespec="seconds"),
+        "format": FORMAT, "version": 2, "id": state["p_id"], "saved": datetime.now().isoformat(timespec="seconds"),
         "info": {k: state.get(k, "") for k in FIELDS},
         "currency": state.get(CURRENCY_KEY, "USD"),
         "boq": state["boq"].to_dict("records"),
         "rates": state["rates"].to_dict("records"),
         "takeoff": {k: takeoff[k] for k in measure.TAKEOFF_KEYS if k in takeoff},
         "admin": state.get("admin", {}),
+        "files": _pack(state.get("files")),
+        "models": _pack(state.get("models")),
+        "hidden_layers": state.get("hidden_layers", {}),
     }
 
 
@@ -58,9 +78,19 @@ def restore(state, data: dict) -> None:
     seen = state["mt"]["seen"] if "mt" in state else []
     state["mt"] = measure.from_dict(data.get("takeoff") or {})
     state["mt"]["seen"] = seen  # the canvas still holds its last event; don't replay it in the new project
-    for key, value in (("details", {}), ("rate_report", None), ("legends", {}), ("mt_selected", None), ("mt_calibration_pts", None)):
+    state["p_id"] = data.get("id") or uuid.uuid4().hex
+    state["files"] = _unpack(data.get("files"))
+    state["models"] = _unpack(data.get("models"))
+    state["hidden_layers"] = dict(data.get("hidden_layers") or {})
+    for name in state["files"]:  # drawings saved before buildings owned drawings go to the first building
+        measure.drawing_building(state["mt"], name)
+    for key, value in (("details", {}), ("rate_report", None), ("legends", {}), ("mt_selected", None),
+                       ("mt_calibration_pts", None), ("dim_hl_item", None)):
         state[key] = value
-    for key in ("boq_ver", "rates_ver", "mt_ver"):
+    for key in list(state.keys()):  # the previous project's selections, pages and open drawing
+        if key in VIEW_KEYS or str(key).startswith("mt_pg_"):
+            del state[key]
+    for key in ("boq_ver", "rates_ver", "mt_ver", "layer_ver", "proj_ver"):
         state[key] = state.get(key, 0) + 1
 
 
@@ -74,8 +104,15 @@ def merge(state, data: dict) -> dict:
     library = pd.DataFrame(data.get("rates") or [], columns=rates.COLUMNS)
     if not library.empty:
         state["rates"] = rates.merge(state["rates"], library)
-    summary = measure.merge_takeoff(state["mt"], measure.from_dict(data.get("takeoff") or {}))
+    files, doc_map = state.setdefault("files", {}), {}
+    for name, raw in _unpack(data.get("files")).items():  # the other project's drawings come too; a clashing name is renamed
+        new = name if name not in files or files[name] == raw else unique_file(name, files)
+        files[new] = raw
+        if new != name:
+            doc_map[name] = new
+    summary = measure.merge_takeoff(state["mt"], measure.from_dict(data.get("takeoff") or {}), doc_map)
     summary["boq_lines"] = len(lines)
+    summary["drawings"] = len(data.get("files") or {})
     for key in ("boq_ver", "rates_ver", "mt_ver"):
         state[key] = state.get(key, 0) + 1
     return summary
@@ -85,6 +122,17 @@ def unique_name(name: str, taken) -> str:
     candidate, n = name, 2
     while candidate in taken:
         candidate, n = f"{name} ({n})", n + 1
+    return candidate
+
+
+def unique_file(name: str, taken) -> str:
+    """'plan.pdf' → 'plan (2).pdf' when the name is already used."""
+    stem, dot, ext = name.rpartition(".")
+    if not dot:
+        stem, ext = name, ""
+    n = 2
+    while (candidate := f"{stem} ({n}){dot}{ext}") in taken:
+        n += 1
     return candidate
 
 
