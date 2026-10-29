@@ -85,7 +85,7 @@ div[data-testid="stTabs"] div[data-testid="stPopover"] button {padding: .2rem .3
 /* icon tools: square, centred; the name shows in the tooltip */
 .st-key-qto_ribbon div[data-testid="stButton"] button, .st-key-qto_ribbon div[data-testid="stDownloadButton"] button,
 .st-key-qto_ribbon div[data-testid="stPopover"] button, .st-key-qto_bar div[data-testid="stButton"] button
-  {min-width: 2.3rem; min-height: 2.3rem !important; height: 2.3rem; padding: 0 .25rem !important; justify-content: center;}
+  {min-width: 1.85rem; min-height: 1.85rem !important; height: 1.85rem; padding: 0 .1rem !important; justify-content: center;}
 .st-key-qto_ribbon button p, .st-key-qto_bar button p {font-size: 1.2rem !important; line-height: 1 !important;}
 .st-key-qto_ribbon div[data-testid="stToggle"] label p {font-size: 1.2rem !important;}
 /* group titles (DRAWING, VIEW…): keep their line; the auto-width groups otherwise squash them to nothing */
@@ -93,7 +93,7 @@ div[data-testid="stTabs"] div[data-testid="stPopover"] button {padding: .2rem .3
 .st-key-qto_ribbon div[data-testid="stCaptionContainer"], .st-key-qto_ribbon div[data-testid="stCaptionContainer"] p
   {white-space: nowrap; overflow: visible; width: max-content; max-width: none; color: #64748b; font-weight: 600;}
 .st-key-qto_ribbon div[data-testid="stVerticalBlockBorderWrapper"] {padding: .15rem .35rem .3rem; border-radius: 6px;}
-.st-key-qto_ribbon div[data-testid="stCaptionContainer"] p {font-size: .6rem; letter-spacing: .06em; margin: 0; line-height: 1;}
+.st-key-qto_ribbon div[data-testid="stCaptionContainer"] p {font-size: .9rem; letter-spacing: .05em; margin: 0; line-height: 1.1;}
 .st-key-qto_ribbon div[data-baseweb="select"] > div, .st-key-qto_ribbon input {min-height: 1.75rem; font-size: .75rem;}
 .st-key-qto_ribbon div[data-baseweb="select"] > div > div {padding-top: 0; padding-bottom: 0;}
 .st-key-qto_ribbon div[data-testid="stRadio"] label p, .st-key-qto_ribbon div[data-testid="stToggle"] label p {font-size: .75rem;}
@@ -124,7 +124,7 @@ header[data-testid="stHeader"], section[data-testid="stSidebar"], div[data-testi
 .st-key-qto_quick div[data-testid="stHorizontalBlock"] {flex-wrap: nowrap; gap: .15rem !important;}
 .st-key-qto_quick div[data-testid="stColumn"], .st-key-qto_quick div[data-testid="column"]
   {flex: 0 0 auto !important; width: auto !important; min-width: 0 !important;}
-.st-key-qto_ribbon [role="tablist"] {min-height: 2.4rem; align-items: flex-end;}
+.st-key-qto_ribbon [role="tablist"] {min-height: 2rem; align-items: flex-end;}
 .st-key-qto_ribbon [data-baseweb="tab-panel"], .st-key-qto_ribbon [role="tabpanel"] {padding: .2rem 0 0 !important;}
 .st-key-qto_ribbon [data-baseweb="tab-highlight"], .st-key-qto_ribbon [data-baseweb="tab-border"] {margin: 0;}
 .st-key-rb_views div[data-testid="stHorizontalBlock"] {flex-wrap: wrap; gap: .15rem !important;}
@@ -177,7 +177,7 @@ for key, value in {"boq": boq.empty(), "boq_ver": 0, "details": {}, "rates": rat
                    "account": {}, "opts": {"canvas_height": 760, "decimals": 3, "snap": True, "offsets": True,
                                             "currency": "USD", "standard": STANDARDS[0], "company": ""},
                    "admin": admin.defaults(), "admin_ver": 0, "hidden_layers": {}, "layer_ver": 0, "models": {},
-                   "mt_show": "Both", "dim_hl_item": None, "mt_deduct": False, "mt_level": "",
+                   "mt_show": "Both", "dim_hl_item": None, "mt_deduct": False, "mt_level": "", "proj_ver": 0, "p_id": "",
                    "ribbon_min": False, "ui_max": False}.items():
     ss.setdefault(key, value)
 ss["mt"] = measure.upgrade(ss["mt"])
@@ -191,8 +191,14 @@ if ss.nav not in NAV:  # views renamed in an update
 # A project switch is requested by a button, then applied here, before any project widget is drawn.
 if "pending_project" in ss:
     pending = ss.pop("pending_project")
-    current = project.snapshot(ss)
+    current = project.snapshot(ss)  # the open project is closed: kept whole in the session list, nothing stays on screen
     ss.projects[current["info"]["p_name"]] = current
+    if pending.get("id") and pending.get("id") == current.get("id"):  # re-opening the open project: keep its latest state
+        pending = current
+    other = ss.projects.get(pending["info"]["p_name"])
+    if pending is not current and other is not None and (pending.get("id") is None or other.get("id") != pending.get("id")):
+        # a different project with the same name: keep both
+        pending = project.renamed(pending, project.unique_name(pending["info"]["p_name"], ss.projects))
     try:
         project.restore(ss, pending)
         ss.projects[pending["info"]["p_name"]] = pending
@@ -527,8 +533,36 @@ def item_label(item: dict) -> str:
     return f"{item['ref']} · {item['description']} ({measure.item_unit(item['type'], item['width'], item['depth'])})"
 
 
-def measurable_files() -> list[str]:
+def current_building() -> int:
+    ids = [b["id"] for b in ss.mt["buildings"]]
+    return ss.get("mt_building") if ss.get("mt_building") in ids else ids[0]
+
+
+def all_drawings() -> list[str]:
+    """Every drawing of the open project (other projects' drawings are never in ss.files)."""
     return [n for n in ss.files if n.lower().endswith(MEASURABLE)]
+
+
+def measurable_files() -> list[str]:
+    """The drawings of the selected building only."""
+    return measure.drawings_for(ss.mt, all_drawings(), current_building())
+
+
+def add_drawing(name: str, data: bytes, building: int) -> str:
+    """Store a drawing in the open project for one building. A name already used by another drawing, or by the
+    same file in another building, gets a ' (2)' suffix so each building keeps its own copy and measurements."""
+    if name in ss.files and (ss.files[name] != data or measure.drawing_building(ss.mt, name) != building):
+        name = project.unique_file(name, ss.files)
+    ss.files[name] = data
+    measure.assign_drawing(ss.mt, name, building)
+    return name
+
+
+def remove_drawing(name: str) -> None:
+    ss.files.pop(name, None)
+    ss.hidden_layers.pop(name, None)
+    measure.remove_drawing(ss.mt, name)
+    ss.project_msg = f"Removed {name}. Its measurements stay in the take-off."
 
 
 def current_drawing() -> tuple[str | None, int]:
@@ -680,27 +714,38 @@ def dlg_property() -> None:
     for name, data in ss.files.items():
         pages = cached_pdf_pages(data) if name.lower().endswith(".pdf") else 1
         scaled = sum(1 for p in range(pages) if mt["calibration"].get(measure.page_key(name, p))) if not name.lower().endswith(".dxf") else pages
-        rows.append({"Drawing": name, "Type": name.rsplit(".", 1)[-1].upper(), "Size (KB)": round(len(data) / 1024, 1), "Pages": pages,
+        rows.append({"Drawing": name, "Building": measure.building_by_id(mt, measure.drawing_building(mt, name))["name"],
+                     "Type": name.rsplit(".", 1)[-1].upper(), "Size (KB)": round(len(data) / 1024, 1), "Pages": pages,
                      "Scaled pages": scaled, "Measurements": sum(1 for s in mt["shapes"] if s["doc"] == name)})
+    st.caption(f"All drawings of “{ss.p_name}”. Each belongs to one building; the Drawings tab lists the selected building's drawings.")
     st.dataframe(pd.DataFrame(rows), hide_index=True)
-    doc = st.selectbox("Drawing", list(ss.files), index=list(ss.files).index(ss.mt_doc) if ss.get("mt_doc") in ss.files else 0)
-    new_name = st.text_input("Rename to", doc)
+    names = list(ss.files)
+    doc = st.selectbox("Drawing", names, index=names.index(ss.mt_doc) if ss.get("mt_doc") in names else 0)
+    bids = [b["id"] for b in mt["buildings"]]
+    owner = measure.drawing_building(mt, doc)
     a, b = st.columns(2)
-    if a.button("✏️ Rename", disabled=not new_name.strip() or new_name.strip() == doc or new_name.strip() in ss.files):
+    move_to = a.selectbox("Building", bids, index=bids.index(owner), format_func=lambda i: measure.building_by_id(mt, i)["name"])
+    if a.button("🏢 Move to this building", disabled=move_to == owner):
+        measure.assign_drawing(mt, doc, move_to)
+        for s in mt["shapes"]:  # its measurements follow the drawing
+            if s["doc"] == doc:
+                s["building"] = move_to
+        ss.pending_building, ss.pending_doc = move_to, doc
+        ss.mt_ver += 1
+        st.rerun()
+    new_name = b.text_input("Rename to", doc)
+    if b.button("✏️ Rename", disabled=not new_name.strip() or new_name.strip() == doc or new_name.strip() in ss.files):
         new_name = new_name.strip()
         ss.files = {(new_name if k == doc else k): v for k, v in ss.files.items()}
-        for s in mt["shapes"]:
-            if s["doc"] == doc:
-                s["doc"] = new_name
-        mt["calibration"] = {(measure.page_key(new_name, int(k.rsplit("|", 1)[1])) if k.startswith(f"{doc}|") else k): v
-                             for k, v in mt["calibration"].items()}
+        if doc in ss.hidden_layers:
+            ss.hidden_layers[new_name] = ss.hidden_layers.pop(doc)
+        measure.rename_drawing(mt, doc, new_name)
         ss.pending_doc = new_name
         ss.mt_ver += 1
         st.rerun()
-    sure = b.checkbox("Confirm remove")
-    if b.button("🗑️ Remove drawing", disabled=not sure):
-        ss.files.pop(doc, None)
-        ss.project_msg = f"Removed {doc}. Its measurements stay in the take-off and reappear if the drawing is imported again."
+    sure = st.checkbox("Confirm remove")
+    if st.button("🗑️ Remove drawing", disabled=not sure):
+        remove_drawing(doc)
         st.rerun()
 
 
@@ -722,10 +767,11 @@ def dlg_import() -> None:
         files = st.file_uploader("PDF, DXF, or scanned plans (PNG/JPG)", type=["pdf", "dxf", "png", "jpg", "jpeg"],
                                  accept_multiple_files=True, key="imp_draw")
         st.caption("DWG: save as DXF first. PDFs and scans open with the 📏 Calibrate tool selected.")
+        building = current_building()
+        st.caption(f"They are added to 🏢 {measure.building_by_id(ss.mt, building)['name']} (choose the building in the Drawings tab).")
         if files and st.button("Add drawings", type="primary"):
-            for f in files:
-                ss.files[f.name] = f.getvalue()
-            ss.pending_doc = files[-1].name
+            added = [add_drawing(f.name, f.getvalue(), building) for f in files]
+            ss.pending_doc = added[-1]
             ss.nav_pending = NAV[0]
             if not files[-1].name.lower().endswith(".dxf"):
                 ss.pending_tool = T_CAL
@@ -1073,6 +1119,7 @@ def recalc_cmd():
 
 
 def open_doc(name: str):
+    ss.mt_building = measure.drawing_building(ss.mt, name)  # a drawing opens together with its building
     ss.mt_doc = name
 
 
@@ -1559,32 +1606,51 @@ VIEW_TIPS = {
 
 def ribbon_drawings() -> None:
     mt = ss.mt
-    c = st.columns([0.5, 2.4, 0.8, 1, 0.45, 0.45, 0.6], vertical_alignment="center")
-    with c[0].popover("📂", use_container_width=True, help="**Drawings** — add PDF, DXF or scanned plans, load the sample, remove"):
-        uploads = st.file_uploader("Add drawings (PDF, DXF, PNG/JPG scans)", type=["pdf", "dxf", "png", "jpg", "jpeg"],
-                                   accept_multiple_files=True, key="up_files")
-        new = [f for f in uploads or [] if f.name not in ss.files]
+    c = st.columns([1.6, 0.45, 0.5, 2.4, 0.8, 1, 0.45, 0.45, 0.6], vertical_alignment="center")
+    if "pending_building" in ss:
+        ss.mt_building = ss.pop("pending_building")
+    if ss.get("pending_doc") in ss.files:  # a drawing opened from a dialog: show its building
+        ss.mt_building = measure.drawing_building(mt, ss.pending_doc)
+    bids = [bld["id"] for bld in mt["buildings"]]
+    if ss.get("mt_building") not in bids:
+        ss.mt_building = bids[0]
+    labels ={bld["id"]: f"🏢 {bld['name']} · {len(measure.drawings_for(mt, all_drawings(), bld['id']))} dwg" for bld in mt["buildings"]}
+    c[0].selectbox("Building", bids, format_func=labels.get, key="mt_building", label_visibility="collapsed",
+                   help="**Building** — shows only this building's drawings; new drawings and measurements are booked to it")
+    if tool(c[1], "🏢", "Add building", "d_building", "Villa, block, car park… levels are copied from the first building"):
+        building_dialog()
+    building = current_building()
+    bname = measure.building_by_id(mt, building)["name"]
+    with c[2].popover("📂", use_container_width=True, help=f"**Drawings of {bname}** — add PDF, DXF or scanned plans, load the sample, remove"):
+        uploads = st.file_uploader(f"Add drawings to {bname} (PDF, DXF, PNG/JPG scans)", type=["pdf", "dxf", "png", "jpg", "jpeg"],
+                                   accept_multiple_files=True, key=f"up_files_{ss.proj_ver}_{building}")
+        done = ss.setdefault("uploaded", set())
+        new = [f for f in uploads or [] if (getattr(f, "file_id", None) or f"{f.name}|{f.size}") not in done]
+        names = []
         for f in new:
-            ss.files[f.name] = f.getvalue()
-        if new:  # open the new drawing straight away; PDFs and scans start with the calibrate tool
-            ss.mt_doc = new[-1].name
+            done.add(getattr(f, "file_id", None) or f"{f.name}|{f.size}")
+            names.append(add_drawing(f.name, f.getvalue(), building))
+        if names:  # open the new drawing straight away; PDFs and scans start with the calibrate tool
+            ss.mt_doc = names[-1]
             ss.nav_pending = NAV[0]
-            if not new[-1].name.lower().endswith(".dxf"):
+            if not names[-1].lower().endswith(".dxf"):
                 ss.mt_tool = T_CAL
             st.rerun()
         if st.button("✨ Load sample plan", key="load_sample"):
-            ss.files["sample_plan.dxf"] = samples.sample_dxf_bytes()
-            ss.mt_doc = "sample_plan.dxf"
+            ss.mt_doc = add_drawing("sample_plan.dxf", samples.sample_dxf_bytes(), building)
             st.rerun()
-        if ss.files:
-            gone = st.selectbox("Remove a drawing", ["—", *ss.files], key="rm_file")
+        own = measurable_files()
+        if own:
+            gone = st.selectbox(f"Remove a drawing of {bname}", ["—", *own], key="rm_file")
             if gone != "—" and st.button("Remove", key="rm_file_go"):
-                ss.files.pop(gone, None)
+                remove_drawing(gone)
                 st.rerun()
-        st.caption("DWG: save as DXF first. Revit/ArchiCAD/Tekla: export IFC for 🧊 3D Models.")
+        st.caption("DWG: save as DXF first. Revit/ArchiCAD/Tekla: export IFC for 🧊 3D Models. "
+                   "To move a drawing to another building: File → ℹ️ Property.")
+    c = c[2:]  # from here on: 📂, drawing, page, detail, snap, offsets, scale
     names = measurable_files()
     if not names:
-        c[1].caption("No drawings yet — use 📂 Drawings to add files or load the sample plan.")
+        c[1].caption(f"No drawings for {bname} yet — use 📂 to add them or load the sample plan.")
         return
     if "pending_doc" in ss:  # set by File → Import / Property dialogs
         ss.mt_doc = ss.pop("pending_doc")
@@ -1634,21 +1700,13 @@ def ribbon_dimension() -> None:
                                                           ("✔", "Finish", "finish", "Finish the measurement (Enter / double-click)"),
                                                           ("✕", "Cancel", "cancel", "Cancel the measurement in progress (Esc)")]):
         tool(col, icon, name, f"d_{cmd}", tip, on_click=view_cmd, args=(cmd,))
-    b = st.columns([2.2, 0.5, 1.4, 4])
-    if tool(b[1], "🏢", "Add building", "d_building", "Villa, block, car park… levels are copied from the first building"):
-        building_dialog()
-    if "pending_building" in ss:
-        ss.mt_building = ss.pop("pending_building")
-    bids = [bld["id"] for bld in mt["buildings"]]
-    if ss.get("mt_building") not in bids:
-        ss.mt_building = bids[0]
-    names = {bld["id"]: f"🏢 {bld['name']}" for bld in mt["buildings"]}
-    b[0].selectbox("Building", bids, format_func=names.get, key="mt_building", label_visibility="collapsed",
-                   help="New measurements are booked to this building")
+    b = st.columns([2.2, 1.4, 4.5], vertical_alignment="center")
+    b[0].markdown(f"🏢 **{measure.building_by_id(mt, current_building())['name']}**",
+                  help="Measurements are booked to the building of the open drawing — change building in the Drawings tab")
     zones = ["", *admin.zones(ss.admin)]
     if ss.get("mt_level", "") not in zones:  # a level typed in an older version, or a zone removed in Administration
         zones.append(ss.mt_level)
-    b[2].selectbox("Level / zone", zones, key="mt_level", format_func=lambda z: z or "Level / zone…", label_visibility="collapsed",
+    b[1].selectbox("Level / zone", zones, key="mt_level", format_func=lambda z: z or "Level / zone…", label_visibility="collapsed",
                    help="Zone for new measurements — the list is Administration → Standard Zones")
     c = st.columns([0.01, 3.2, 0.5, 0.5, 0.9, 0.6, 1.6], vertical_alignment="center")
     if tool(c[2], "🆕", "Add dimension group", "d_new", "Footing, wall, slab… or a simple count / length / area"):
@@ -1731,7 +1789,7 @@ def ribbon_workbook() -> None:
     c[2].download_button("💾", measure.to_json(mt), file_name="takeoff.qto.json", mime="application/json",
                          disabled=not mt["items"], use_container_width=True, help="**Save take-off** — only the take-off; File → Save keeps everything")
     with c[3].popover("📂", use_container_width=True, help="**Open take-off** — load a saved take-off file"):
-        saved = st.file_uploader("Saved take-off (.json)", type=["json"], key="mt_open")
+        saved = st.file_uploader("Saved take-off (.json)", type=["json"], key=f"mt_open_{ss.proj_ver}")
         if saved is not None and st.button("Load (replaces current take-off)", key="mt_open_go"):
             try:
                 loaded = measure.from_json(saved.getvalue())
@@ -2353,7 +2411,7 @@ def render_mesh(name: str, data: bytes) -> None:
 
 def view_auto2d() -> None:
     st.caption("Automatic take-off from CAD layers (DXF) or PDF linework. Add drawings in the Drawings tab → 📂 Drawings.")
-    drawings = [n for n in ss.files if n.lower().endswith((".dxf", ".pdf"))]
+    drawings = [n for n in measurable_files() if n.lower().endswith((".dxf", ".pdf"))]  # the selected building's drawings
     if not drawings:
         st.info("No DXF or PDF drawings yet. Drawings tab → 📂 Drawings → add files or ✨ Load sample plan.")
         return
@@ -2363,7 +2421,7 @@ def view_auto2d() -> None:
 
 def view_3d() -> None:
     models = st.file_uploader("Upload 3D models (IFC, OBJ, STL, PLY, GLB, OFF)", type=["ifc", *mesh_takeoff.MESH_TYPES],
-                              accept_multiple_files=True, key="up_3d")
+                              accept_multiple_files=True, key=f"up_3d_{ss.proj_ver}")
     for m in models or []:  # kept for the session so Dimension View → Model can list them
         ss.models.setdefault(m.name, m.getvalue())
     if not ss.models:
@@ -2383,7 +2441,7 @@ def view_schedules() -> None:
         with sub:
             up_col, tpl_col = st.columns([4, 1])
             files = up_col.file_uploader(f"{discipline} schedules (Excel or CSV)", type=["xlsx", "xls", "csv"],
-                                         accept_multiple_files=True, key=f"sch_{discipline}")
+                                         accept_multiple_files=True, key=f"sch_{discipline}_{ss.proj_ver}")
             template = schedules.template(discipline)
             tpl_col.download_button("⬇️ Template", template.to_csv(index=False).encode("utf-8-sig"),
                                     file_name=f"{discipline.lower()}_schedule_template.csv", mime="text/csv", key=f"tpl_{discipline}")
@@ -2418,7 +2476,7 @@ def view_rates() -> None:
     st.caption("The library is kept only for this browser session — download it to keep it. Matching uses the item code first, "
                "then the closest description with the same unit.")
     up_col, dl_col = st.columns([3, 2])
-    rate_file = up_col.file_uploader("Upload a rate library (Excel or CSV)", type=["xlsx", "xls", "csv"], key="up_rates")
+    rate_file = up_col.file_uploader("Upload a rate library (Excel or CSV)", type=["xlsx", "xls", "csv"], key=f"up_rates_{ss.proj_ver}")
     dl_col.write("")
     d1, d2, d3 = dl_col.columns(3)
     d1.download_button("⬇️ Template", rates.to_excel(rates.empty(), currency), file_name="rate_library_template.xlsx",
@@ -2604,7 +2662,8 @@ def window_buttons(b1, b2) -> None:
 with st.container(key="qto_bar"):  # title row: app name and project on the left, the two window buttons on the right
     t, b1, b2 = st.columns([20, 1, 1], vertical_alignment="center")
     errors = f"<span class='err'>⚠ {issue_count} error(s)</span>" if issue_count else ""
-    t.markdown(f"<div class='titlebar'><b>📐 QTO Studio</b><span>📁 {ss.p_name}</span><span>{ss.nav}</span>"
+    t.markdown(f"<div class='titlebar'><b>📐 QTO Studio</b><span>📁 {ss.p_name}</span>"
+               f"<span>🏢 {measure.building_by_id(ss.mt, current_building())['name']}</span><span>{ss.nav}</span>"
                f"<span>{doc_name or 'no drawing'}{f' p{page_no + 1}' if doc_name else ''}</span>"
                f"<span>{len(ss.mt['items'])} groups · {len(ss.mt['shapes'])} measurements · {len(ss.boq)} BOQ lines</span>{errors}</div>",
                unsafe_allow_html=True)
